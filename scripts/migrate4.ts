@@ -1,0 +1,34 @@
+import { Pool } from 'pg';
+import fs from 'fs';
+import path from 'path';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
+async function migrate(): Promise<void> {
+  const sqlPath = path.join(__dirname, '../src/db/migrations/004_device_config.sql');
+  const sql     = fs.readFileSync(sqlPath, 'utf8');
+  const client  = await pool.connect();
+  try {
+    console.log('Connexion à Neon PostgreSQL...');
+    await client.query(sql);
+    console.log('Migration 004 exécutée — colonnes de configuration ajoutées à la table devices.');
+  } catch (err: any) {
+    if (err.code === '42701') {
+      console.log('Colonnes déjà existantes — migration ignorée.');
+    } else {
+      console.error('Erreur :', err.message);
+      process.exit(1);
+    }
+  } finally {
+    client.release();
+    await pool.end();
+  }
+}
+
+migrate();

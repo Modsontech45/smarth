@@ -6,6 +6,7 @@ import {
   updateDevice,
   deleteDevice,
   updateDeviceStatus,
+  getSignalTypes,
 } from '../controllers/devices.controller';
 import { verifyJWT } from '../middleware/auth.middleware';
 import { requireRole } from '../middleware/role.middleware';
@@ -14,6 +15,20 @@ const router = Router();
 
 // Toutes les routes nécessitent un JWT
 router.use(verifyJWT);
+
+/**
+ * @swagger
+ * /api/devices/signal-types:
+ *   get:
+ *     summary: Lister tous les types de signaux et types de données disponibles
+ *     tags: [Appareils]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Référence complète des signal_type et data_type
+ */
+router.get('/signal-types', getSignalTypes);
 
 /**
  * @swagger

@@ -542,6 +542,28 @@
           ]
         },
         {
+          "name": "Types de signaux (référence)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/devices/signal-types",
+              "host": ["{{base_url}}"],
+              "path": ["api", "devices", "signal-types"]
+            },
+            "description": "Retourne la liste complète des `signal_type` et `data_type` disponibles avec leurs unités typiques et cas d'usage. À appeler avant de créer un appareil pour connaître les valeurs acceptées."
+          },
+          "response": [
+            {
+              "name": "200 Types disponibles",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"signal_types\": [\n    { \"value\": \"digital\", \"label\": \"Digital (HIGH/LOW)\",       \"data_types\": [\"boolean\"],              \"example_units\": [\"boolean\"],         \"typical_use\": \"Relais, buzzer, PIR, fuite d'eau\" },\n    { \"value\": \"analog\",  \"label\": \"Analogique (ADC 0–4095)\", \"data_types\": [\"float\",\"integer\"],      \"example_units\": [\"ppm\",\"lux\",\"%\"],   \"typical_use\": \"MQ-2 gaz, LDR lumière\" },\n    { \"value\": \"pwm\",    \"label\": \"PWM (0–255)\",              \"data_types\": [\"integer\",\"percentage\"],  \"example_units\": [\"%\",\"pwm\"],          \"typical_use\": \"Variateur, ventilateur\" },\n    { \"value\": \"dht22\",  \"label\": \"DHT22 (Temp + Humidité)\", \"data_types\": [\"float\"],               \"example_units\": [\"°C\",\"%\"],          \"typical_use\": \"Capteur DHT22\" },\n    { \"value\": \"i2c\",    \"label\": \"I2C\",                     \"data_types\": [\"float\",\"integer\"],      \"example_units\": [\"Pa\",\"lux\",\"ppm\"],  \"typical_use\": \"BMP280, capteurs I2C\" },\n    { \"value\": \"uart\",   \"label\": \"UART/Serial\",              \"data_types\": [\"float\",\"integer\"],      \"example_units\": [\"ppm\",\"µg/m³\"],     \"typical_use\": \"MHZ19 CO2, PMS5003\" }\n  ],\n  \"data_types\": [\n    { \"value\": \"boolean\",    \"label\": \"Booléen (true/false)\",  \"range\": \"0 ou 1\" },\n    { \"value\": \"float\",      \"label\": \"Décimal\",               \"range\": \"ex. -40.0 à 80.0\" },\n    { \"value\": \"integer\",    \"label\": \"Entier\",                \"range\": \"ex. 0 à 4095\" },\n    { \"value\": \"percentage\", \"label\": \"Pourcentage\",           \"range\": \"0 à 100\" }\n  ]\n}"
+            }
+          ]
+        },
+        {
           "name": "Ajouter un appareil (ADMIN)",
           "event": [
             {
@@ -567,7 +589,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Capteur Gaz Salon\",\n  \"type\": \"INPUT\",\n  \"zone\": \"salon\",\n  \"description\": \"Capteur MQ-2 — détection gaz et fumée\"\n}",
+              "raw": "{\n  \"name\": \"Capteur Gaz Salon\",\n  \"type\": \"INPUT\",\n  \"zone\": \"salon\",\n  \"description\": \"Capteur MQ-2 — détection gaz et fumée\",\n  \"signal_type\": \"analog\",\n  \"data_type\": \"float\",\n  \"unit\": \"ppm\",\n  \"min_value\": 0,\n  \"max_value\": 1000,\n  \"gpio_pin\": 34\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": {
@@ -575,22 +597,29 @@
               "host": ["{{base_url}}"],
               "path": ["api", "devices"]
             },
-            "description": "Crée un nouvel appareil. Réservé aux **ADMIN**.\n\n- `device_key` générée automatiquement (64 hex) — **retournée une seule fois**\n- Le script de test sauvegarde `device_id` et `device_key` dans les variables de collection\n- `type` : `INPUT` = capteur · `OUTPUT` = actionneur"
+            "description": "Crée un nouvel appareil. Réservé aux **ADMIN**.\n\n**Champs obligatoires :** `name`, `type`\n\n**Champs de configuration (optionnels — des valeurs par défaut sont appliquées) :**\n- `signal_type` : `digital` · `analog` · `pwm` · `dht22` · `i2c` · `uart`\n- `data_type` : `boolean` · `float` · `integer` · `percentage`\n- `unit` : unité de mesure (°C, %, ppm, lux, boolean…)\n- `min_value` / `max_value` : plage de valeurs attendue\n- `gpio_pin` : broche GPIO ESP32\n\n> Utiliser `GET /api/devices/signal-types` pour la référence complète."
           },
           "response": [
             {
-              "name": "201 Appareil créé",
+              "name": "201 Capteur analogique (MQ-2)",
               "status": "Created",
               "code": 201,
               "header": [{ "key": "Content-Type", "value": "application/json" }],
-              "body": "{\n  \"message\": \"Appareil ajouté avec succès\",\n  \"device\": {\n    \"id\": 3,\n    \"name\": \"Capteur Gaz Salon\",\n    \"type\": \"INPUT\",\n    \"status\": \"OFFLINE\",\n    \"zone\": \"salon\",\n    \"description\": \"Capteur MQ-2 — détection gaz et fumée\",\n    \"device_key\": \"f7e3a1c9b2d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0\",\n    \"created_at\": \"2026-06-04T10:00:00Z\"\n  }\n}"
+              "body": "{\n  \"message\": \"Appareil ajouté avec succès\",\n  \"device\": {\n    \"id\": 3,\n    \"name\": \"Capteur Gaz Salon\",\n    \"type\": \"INPUT\",\n    \"status\": \"OFFLINE\",\n    \"zone\": \"salon\",\n    \"description\": \"Capteur MQ-2 — détection gaz et fumée\",\n    \"signal_type\": \"analog\",\n    \"data_type\": \"float\",\n    \"unit\": \"ppm\",\n    \"min_value\": 0,\n    \"max_value\": 1000,\n    \"gpio_pin\": 34,\n    \"device_key\": \"f7e3a1c9b2d4...\",\n    \"created_at\": \"2026-06-04T10:00:00Z\"\n  }\n}"
             },
             {
-              "name": "403 Non autorisé",
-              "status": "Forbidden",
-              "code": 403,
+              "name": "201 Actionneur PWM (ventilateur)",
+              "status": "Created",
+              "code": 201,
               "header": [{ "key": "Content-Type", "value": "application/json" }],
-              "body": "{ \"error\": \"Permissions insuffisantes\" }"
+              "body": "{\n  \"message\": \"Appareil ajouté avec succès\",\n  \"device\": {\n    \"id\": 4,\n    \"name\": \"Ventilateur Salon\",\n    \"type\": \"OUTPUT\",\n    \"status\": \"OFFLINE\",\n    \"zone\": \"salon\",\n    \"signal_type\": \"pwm\",\n    \"data_type\": \"percentage\",\n    \"unit\": \"%\",\n    \"min_value\": 0,\n    \"max_value\": 100,\n    \"gpio_pin\": 19,\n    \"device_key\": \"a1b2c3d4e5f6...\",\n    \"created_at\": \"2026-06-04T10:00:00Z\"\n  }\n}"
+            },
+            {
+              "name": "400 signal_type invalide",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"signal_type invalide. Valeurs acceptées : digital, analog, pwm, dht22, i2c, uart\" }"
             }
           ]
         },
