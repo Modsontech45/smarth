@@ -1,0 +1,344 @@
+{
+  "info": {
+    "_postman_id": "smarthome-auth-v1",
+    "name": "smarthome",
+    "description": "Endpoints d'authentification pour le backend IoT SmartHome.\n\n**Configuration :**\n1. La variable `base_url` est définie sur `http://localhost:3000`\n2. Après la connexion, la variable `jwt_token` est sauvegardée automatiquement via le script de test.\n\n**Flux d'authentification :**\n`Inscription` → vérifier l'email → `Connexion` → utiliser `{{jwt_token}}` dans les routes protégées.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url",     "value": "http://localhost:3000", "type": "string" },
+    { "key": "jwt_token",    "value": "",                      "type": "string" },
+    { "key": "reset_token",  "value": "",                      "type": "string" },
+    { "key": "verify_token", "value": "",                      "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Authentification",
+      "description": "Toutes les routes d'authentification — aucun JWT requis sauf indication contraire.",
+      "item": [
+        {
+          "name": "Inscription",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice\",\n  \"email\": \"alice@smarthome.com\",\n  \"password\": \"motdepasse1!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "register"]
+            },
+            "description": "Crée un nouveau compte utilisateur.\n\n- Le mot de passe est haché avec bcrypt (12 rounds)\n- Une `api_key` unique (64 caractères hex) est générée — **retournée une seule fois**. Sauvegardez-la pour la flasher dans le firmware ESP32.\n- Un email de vérification est envoyé avec un token valable 24h\n- Retourne `201` avec `api_key` et les informations de l'utilisateur"
+          },
+          "response": [
+            {
+              "name": "201 Compte créé",
+              "status": "Created",
+              "code": 201,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"message\": \"Compte créé avec succès. Veuillez vérifier votre email pour activer votre compte.\",\n  \"api_key\": \"a3f8c2e1d4b7...\",\n  \"user\": {\n    \"id\": 1,\n    \"name\": \"Alice\",\n    \"email\": \"alice@smarthome.com\",\n    \"role\": \"USER\"\n  }\n}"
+            },
+            {
+              "name": "409 Email déjà utilisé",
+              "status": "Conflict",
+              "code": 409,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Cet email est déjà utilisé\" }"
+            },
+            {
+              "name": "400 Erreur de validation",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Le mot de passe doit contenir au moins 8 caractères\" }"
+            }
+          ]
+        },
+        {
+          "name": "Connexion",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const json = pm.response.json();",
+                  "  pm.collectionVariables.set('jwt_token', json.token);",
+                  "  console.log('jwt_token sauvegardé :', json.token.substring(0, 20) + '...');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@smarthome.com\",\n  \"password\": \"motdepasse1!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Authentification avec email et mot de passe.\n\n- Vérifie le hash bcrypt\n- Bloque les emails non vérifiés avec `403`\n- Retourne un JWT signé (expiration par défaut : 24h)\n- **Script de test** sauvegarde automatiquement `jwt_token` dans les variables de collection"
+          },
+          "response": [
+            {
+              "name": "200 Connexion réussie",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"user\": {\n    \"id\": 1,\n    \"name\": \"Alice\",\n    \"email\": \"alice@smarthome.com\",\n    \"role\": \"USER\"\n  }\n}"
+            },
+            {
+              "name": "401 Identifiants incorrects",
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Identifiants incorrects\" }"
+            },
+            {
+              "name": "403 Email non vérifié",
+              "status": "Forbidden",
+              "code": 403,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Veuillez vérifier votre email avant de vous connecter.\" }"
+            }
+          ]
+        },
+        {
+          "name": "Vérification de l'email",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/verify-email/:token",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "verify-email", ":token"],
+              "variable": [
+                {
+                  "key": "token",
+                  "value": "{{verify_token}}",
+                  "description": "Token reçu dans le lien de l'email de vérification"
+                }
+              ]
+            },
+            "description": "Confirme l'adresse email de l'utilisateur.\n\n- Le token est une chaîne hex de 64 caractères envoyée par email après l'inscription\n- Le token expire après 24 heures\n- Met `email_verified = true` et efface le token"
+          },
+          "response": [
+            {
+              "name": "200 Email vérifié",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"message\": \"Email vérifié avec succès. Vous pouvez maintenant vous connecter.\" }"
+            },
+            {
+              "name": "400 Token invalide",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Token invalide ou expiré\" }"
+            }
+          ]
+        },
+        {
+          "name": "Mot de passe oublié",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@smarthome.com\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/forgot-password",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "forgot-password"]
+            },
+            "description": "Envoie un lien de réinitialisation du mot de passe à l'adresse email.\n\n- Retourne toujours `200` que l'email existe ou non (évite l'énumération des emails)\n- Le token de réinitialisation expire dans **1 heure**\n- Le lien de réinitialisation est : `CLIENT_URL/reset-password?token=<token>`"
+          },
+          "response": [
+            {
+              "name": "200 OK (toujours)",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"message\": \"Si cet email est enregistré, un lien de réinitialisation a été envoyé.\" }"
+            }
+          ]
+        },
+        {
+          "name": "Réinitialisation du mot de passe",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{reset_token}}\",\n  \"password\": \"nouveauMotDePasse1!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/reset-password",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "reset-password"]
+            },
+            "description": "Définit un nouveau mot de passe à partir du token reçu par email.\n\n- Le token ne doit pas être expiré (fenêtre de 1h)\n- Le nouveau mot de passe est haché avec bcrypt (12 rounds)\n- Le token est effacé après utilisation (usage unique)"
+          },
+          "response": [
+            {
+              "name": "200 Mot de passe réinitialisé",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"message\": \"Mot de passe réinitialisé avec succès. Vous pouvez maintenant vous connecter.\" }"
+            },
+            {
+              "name": "400 Token invalide ou expiré",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Token invalide ou expiré\" }"
+            }
+          ]
+        },
+        {
+          "name": "Connexion avec Google",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  const json = pm.response.json();",
+                  "  pm.collectionVariables.set('jwt_token', json.token);",
+                  "  console.log('jwt_token sauvegardé depuis Google Auth');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id_token\": \"<Token Google ID obtenu côté client>\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/google",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "google"]
+            },
+            "description": "Authentifie ou inscrit un utilisateur via Google OAuth.\n\n**Flux côté client :**\n1. Utiliser Google Identity Services ou Firebase Auth pour obtenir un `id_token`\n2. Envoyer ce token à cet endpoint\n\n**Comportement serveur :**\n- Vérifie le `id_token` auprès de l'API Google\n- Nouvel utilisateur → crée le compte, retourne `201` + `api_key`\n- Utilisateur existant → connexion, retourne `200`\n- Lie automatiquement le compte Google aux comptes existants par email\n\n**`GOOGLE_CLIENT_ID`** doit être défini dans le `.env`"
+          },
+          "response": [
+            {
+              "name": "201 Nouveau compte créé",
+              "status": "Created",
+              "code": 201,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"api_key\": \"a3f8c2e1d4b7...\",\n  \"user\": {\n    \"id\": 2,\n    \"name\": \"Bob\",\n    \"email\": \"bob@gmail.com\",\n    \"role\": \"USER\"\n  }\n}"
+            },
+            {
+              "name": "200 Utilisateur existant connecté",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"user\": {\n    \"id\": 2,\n    \"name\": \"Bob\",\n    \"email\": \"bob@gmail.com\",\n    \"role\": \"USER\"\n  }\n}"
+            },
+            {
+              "name": "401 Token Google invalide",
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Token Google invalide\" }"
+            }
+          ]
+        },
+        {
+          "name": "Mon profil",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "Token JWT obtenu après la connexion"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "me"]
+            },
+            "description": "Retourne le profil de l'utilisateur authentifié.\n\n**Requis :** `Authorization: Bearer {{jwt_token}}`\n\nInclut l'`api_key` à utiliser dans le firmware ESP32."
+          },
+          "response": [
+            {
+              "name": "200 Profil",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"user\": {\n    \"id\": 1,\n    \"name\": \"Alice\",\n    \"email\": \"alice@smarthome.com\",\n    \"role\": \"USER\",\n    \"api_key\": \"a3f8c2e1d4b7...\",\n    \"email_verified\": true,\n    \"created_at\": \"2026-06-03T10:00:00Z\"\n  }\n}"
+            },
+            {
+              "name": "401 Non authentifié",
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"En-tête Authorization manquant ou mal formé\" }"
+            }
+          ]
+        },
+        {
+          "name": "Régénérer la clé API",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/regenerate-api-key",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "regenerate-api-key"]
+            },
+            "description": "Génère une nouvelle `api_key` pour le compte.\n\n**Attention :** Après la régénération, vous devez reflasher tous les appareils ESP32 avec la nouvelle clé — l'ancienne clé sera immédiatement invalidée.\n\n**Requis :** `Authorization: Bearer {{jwt_token}}`"
+          },
+          "response": [
+            {
+              "name": "200 Nouvelle clé",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"message\": \"Clé API régénérée avec succès. Mettez à jour le firmware de votre ESP32 avec la nouvelle clé.\",\n  \"api_key\": \"nouvelle_cle_64_hex...\"\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+# Dépendances
+node_modules/
+
+# Claude Code
+.claude/
+
+# Variables d'environnement
+.env
+
+# Build TypeScript
+dist/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
