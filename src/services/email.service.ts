@@ -29,6 +29,29 @@ export async function sendVerificationEmail(to: string, name: string, token: str
   });
 }
 
+export async function sendInvitationEmail(
+  to: string,
+  inviterName: string,
+  role: string,
+  token: string
+): Promise<void> {
+  const link      = `${CLIENT_URL}/accept-invite?token=${token}`;
+  const roleLabel = role === 'GUEST' ? 'Invité' : 'Utilisateur';
+  await transporter.sendMail({
+    from:    FROM,
+    to,
+    subject: `${inviterName} vous invite à rejoindre SmartHome`,
+    html: `
+      <h2>Vous avez été invité !</h2>
+      <p><strong>${inviterName}</strong> vous invite à rejoindre son système SmartHome en tant que <strong>${roleLabel}</strong>.</p>
+      <p>Cliquez sur le bouton ci-dessous pour créer votre compte :</p>
+      <p><a href="${link}" style="background:#16a34a;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;">Accepter l'invitation</a></p>
+      <p>Ce lien expire dans <strong>48 heures</strong>.</p>
+      <p>Si vous ne connaissez pas cette personne, vous pouvez ignorer cet email.</p>
+    `,
+  });
+}
+
 export async function sendPasswordResetEmail(to: string, name: string, token: string): Promise<void> {
   const link = `${CLIENT_URL}/reset-password?token=${token}`;
   await transporter.sendMail({

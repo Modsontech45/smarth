@@ -2,14 +2,16 @@
   "info": {
     "_postman_id": "smarthome-auth-v1",
     "name": "smarthome",
-    "description": "Endpoints d'authentification pour le backend IoT SmartHome.\n\n**Configuration :**\n1. La variable `base_url` est définie sur `http://localhost:3000`\n2. Après la connexion, la variable `jwt_token` est sauvegardée automatiquement via le script de test.\n\n**Flux d'authentification :**\n`Inscription` → vérifier l'email → `Connexion` → utiliser `{{jwt_token}}` dans les routes protégées.",
+    "description": "Backend IoT SmartHome — tous les endpoints REST.\n\n**Configuration :**\n1. `base_url` = `https://smarth-rlir.onrender.com`\n2. Après la connexion, `jwt_token` est sauvegardé automatiquement.\n\n**Flux :** `Inscription` → vérifier l'email → `Connexion` → utiliser `{{jwt_token}}`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "base_url",     "value": "http://localhost:3000", "type": "string" },
+    { "key": "base_url",     "value": "https://smarth-rlir.onrender.com", "type": "string" },
     { "key": "jwt_token",    "value": "",                      "type": "string" },
     { "key": "reset_token",  "value": "",                      "type": "string" },
-    { "key": "verify_token", "value": "",                      "type": "string" }
+    { "key": "verify_token", "value": "",                      "type": "string" },
+    { "key": "device_id",    "value": "",                      "type": "string" },
+    { "key": "device_key",   "value": "",                      "type": "string" }
   ],
   "item": [
     {
@@ -335,6 +337,715 @@
               "code": 200,
               "header": [{ "key": "Content-Type", "value": "application/json" }],
               "body": "{\n  \"message\": \"Clé API régénérée avec succès. Mettez à jour le firmware de votre ESP32 avec la nouvelle clé.\",\n  \"api_key\": \"nouvelle_cle_64_hex...\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Invitations",
+      "description": "L'ADMIN invite des utilisateurs ou des invités par email. Le lien d'invitation est valable 48h.",
+      "item": [
+        {
+          "name": "Envoyer une invitation (ADMIN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"bob@example.com\",\n  \"role\": \"USER\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/invite",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "invite"]
+            },
+            "description": "L'ADMIN envoie un email d'invitation à une adresse.\n\n- `role` : `USER` (défaut) ou `GUEST`\n- Le lien dans l'email expire dans **48 heures**\n- Impossible d'inviter un email déjà inscrit ou déjà invité"
+          },
+          "response": [
+            {
+              "name": "201 Invitation envoyée",
+              "status": "Created",
+              "code": 201,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"message\": \"Invitation envoyée à bob@example.com avec le rôle USER\",\n  \"expires_at\": \"2026-06-06T10:00:00Z\"\n}"
+            },
+            {
+              "name": "409 Email déjà existant",
+              "status": "Conflict",
+              "code": 409,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Un compte avec cet email existe déjà\" }"
+            },
+            {
+              "name": "403 Non autorisé",
+              "status": "Forbidden",
+              "code": 403,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Permissions insuffisantes\" }"
+            }
+          ]
+        },
+        {
+          "name": "Accepter une invitation",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"<token reçu dans l'email>\",\n  \"name\": \"Bob\",\n  \"password\": \"motdepasse1!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/accept-invite",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "accept-invite"]
+            },
+            "description": "L'invité crée son compte via le token reçu dans l'email.\n\n- Le compte est créé avec le rôle assigné par l'ADMIN\n- L'email est automatiquement marqué comme vérifié\n- L'invitation est marquée comme acceptée (usage unique)\n- Retourne `api_key` — à stocker si l'invité utilise un ESP32"
+          },
+          "response": [
+            {
+              "name": "201 Compte créé",
+              "status": "Created",
+              "code": 201,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"message\": \"Compte créé avec succès. Vous pouvez maintenant vous connecter.\",\n  \"api_key\": \"a3f8c2e1d4b7...\",\n  \"user\": {\n    \"id\": 3,\n    \"name\": \"Bob\",\n    \"email\": \"bob@example.com\",\n    \"role\": \"USER\"\n  }\n}"
+            },
+            {
+              "name": "400 Token invalide",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Invitation invalide ou expirée\" }"
+            }
+          ]
+        },
+        {
+          "name": "Lister les invitations (ADMIN)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/auth/invitations",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "invitations"]
+            },
+            "description": "Retourne toutes les invitations envoyées par l'ADMIN connecté, avec leur statut (en attente / acceptée / expirée)."
+          },
+          "response": [
+            {
+              "name": "200 Liste des invitations",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"invitations\": [\n    {\n      \"id\": 1,\n      \"email\": \"bob@example.com\",\n      \"role\": \"USER\",\n      \"accepted\": false,\n      \"expires_at\": \"2026-06-06T10:00:00Z\",\n      \"created_at\": \"2026-06-04T10:00:00Z\",\n      \"invited_by_name\": \"Alice\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Annuler une invitation (ADMIN)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/auth/invitations/:id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "invitations", ":id"],
+              "variable": [{ "key": "id", "value": "1", "description": "ID de l'invitation" }]
+            },
+            "description": "Annule une invitation non encore acceptée. Impossible d'annuler une invitation déjà acceptée."
+          },
+          "response": [
+            {
+              "name": "200 Annulée",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"message\": \"Invitation pour bob@example.com annulée\" }"
+            },
+            {
+              "name": "404 Introuvable",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Invitation introuvable ou déjà acceptée\" }"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Appareils",
+      "description": "Gestion des appareils (capteurs INPUT et actionneurs OUTPUT). La `device_key` est générée à la création et retournée une seule fois — à flasher dans le firmware ESP32.",
+      "item": [
+        {
+          "name": "Lister les appareils",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/devices",
+              "host": ["{{base_url}}"],
+              "path": ["api", "devices"],
+              "query": [
+                { "key": "type",   "value": "INPUT",  "disabled": true, "description": "Filtrer par type : INPUT ou OUTPUT" },
+                { "key": "status", "value": "ONLINE", "disabled": true, "description": "Filtrer par statut : ONLINE ou OFFLINE" },
+                { "key": "zone",   "value": "salon",  "disabled": true, "description": "Filtrer par zone" }
+              ]
+            },
+            "description": "Retourne tous les appareils du compte authentifié.\n\nFiltres optionnels via query params : `?type=INPUT`, `?status=ONLINE`, `?zone=salon`"
+          },
+          "response": [
+            {
+              "name": "200 Liste des appareils",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"devices\": [\n    {\n      \"id\": 1,\n      \"name\": \"Capteur Temp/Humidité Salon\",\n      \"type\": \"INPUT\",\n      \"status\": \"ONLINE\",\n      \"zone\": \"salon\",\n      \"description\": \"Capteur DHT22\",\n      \"created_at\": \"2026-06-04T10:00:00Z\",\n      \"updated_at\": \"2026-06-04T10:00:00Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Obtenir un appareil",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/devices/:id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "devices", ":id"],
+              "variable": [{ "key": "id", "value": "1", "description": "ID de l'appareil" }]
+            },
+            "description": "Retourne les détails d'un appareil par son ID."
+          },
+          "response": [
+            {
+              "name": "200 Appareil trouvé",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"device\": {\n    \"id\": 1,\n    \"name\": \"Capteur Temp/Humidité Salon\",\n    \"type\": \"INPUT\",\n    \"status\": \"ONLINE\",\n    \"zone\": \"salon\",\n    \"description\": \"Capteur DHT22\",\n    \"created_at\": \"2026-06-04T10:00:00Z\",\n    \"updated_at\": \"2026-06-04T10:00:00Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Introuvable",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Appareil introuvable\" }"
+            }
+          ]
+        },
+        {
+          "name": "Ajouter un appareil (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const json = pm.response.json();",
+                  "  pm.collectionVariables.set('device_id', json.device.id);",
+                  "  pm.collectionVariables.set('device_key', json.device.device_key);",
+                  "  console.log('device_key (à flasher dans ESP32) :', json.device.device_key);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Capteur Gaz Salon\",\n  \"type\": \"INPUT\",\n  \"zone\": \"salon\",\n  \"description\": \"Capteur MQ-2 — détection gaz et fumée\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices",
+              "host": ["{{base_url}}"],
+              "path": ["api", "devices"]
+            },
+            "description": "Crée un nouvel appareil. Réservé aux **ADMIN**.\n\n- `device_key` générée automatiquement (64 hex) — **retournée une seule fois**\n- Le script de test sauvegarde `device_id` et `device_key` dans les variables de collection\n- `type` : `INPUT` = capteur · `OUTPUT` = actionneur"
+          },
+          "response": [
+            {
+              "name": "201 Appareil créé",
+              "status": "Created",
+              "code": 201,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"message\": \"Appareil ajouté avec succès\",\n  \"device\": {\n    \"id\": 3,\n    \"name\": \"Capteur Gaz Salon\",\n    \"type\": \"INPUT\",\n    \"status\": \"OFFLINE\",\n    \"zone\": \"salon\",\n    \"description\": \"Capteur MQ-2 — détection gaz et fumée\",\n    \"device_key\": \"f7e3a1c9b2d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0\",\n    \"created_at\": \"2026-06-04T10:00:00Z\"\n  }\n}"
+            },
+            {
+              "name": "403 Non autorisé",
+              "status": "Forbidden",
+              "code": 403,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Permissions insuffisantes\" }"
+            }
+          ]
+        },
+        {
+          "name": "Modifier un appareil (ADMIN)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Capteur Gaz Salon V2\",\n  \"zone\": \"cuisine\",\n  \"description\": \"Déplacé en cuisine\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/:id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "devices", ":id"],
+              "variable": [{ "key": "id", "value": "{{device_id}}" }]
+            },
+            "description": "Modifie le nom, la zone ou la description d'un appareil. Seuls les champs fournis sont mis à jour."
+          },
+          "response": [
+            {
+              "name": "200 Mis à jour",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"message\": \"Appareil mis à jour\",\n  \"device\": {\n    \"id\": 3,\n    \"name\": \"Capteur Gaz Salon V2\",\n    \"type\": \"INPUT\",\n    \"status\": \"OFFLINE\",\n    \"zone\": \"cuisine\",\n    \"description\": \"Déplacé en cuisine\",\n    \"updated_at\": \"2026-06-04T11:00:00Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Mettre à jour le statut (ADMIN)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ONLINE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/devices/:id/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "devices", ":id", "status"],
+              "variable": [{ "key": "id", "value": "{{device_id}}" }]
+            },
+            "description": "Met à jour uniquement le statut d'un appareil : `ONLINE` ou `OFFLINE`."
+          },
+          "response": [
+            {
+              "name": "200 Statut mis à jour",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"message\": \"Statut mis à jour\",\n  \"device\": {\n    \"id\": 3,\n    \"name\": \"Capteur Gaz Salon\",\n    \"status\": \"ONLINE\",\n    \"updated_at\": \"2026-06-04T11:05:00Z\"\n  }\n}"
+            },
+            {
+              "name": "400 Statut invalide",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Le statut doit être ONLINE ou OFFLINE\" }"
+            }
+          ]
+        },
+        {
+          "name": "Supprimer un appareil (ADMIN)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/devices/:id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "devices", ":id"],
+              "variable": [{ "key": "id", "value": "{{device_id}}" }]
+            },
+            "description": "Supprime définitivement un appareil et toutes ses données associées (cascade)."
+          },
+          "response": [
+            {
+              "name": "200 Supprimé",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"message\": \"Appareil \\\"Capteur Gaz Salon\\\" supprimé avec succès\" }"
+            },
+            {
+              "name": "404 Introuvable",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Appareil introuvable\" }"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Capteurs",
+      "description": "Relevés des capteurs (température, humidité, gaz, mouvement, lumière, fuite d'eau).",
+      "item": [
+        {
+          "name": "Dernier relevé",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/sensors/latest",
+              "host": ["{{base_url}}"],
+              "path": ["api", "sensors", "latest"]
+            },
+            "description": "Retourne le relevé le plus récent de tous les capteurs du compte."
+          },
+          "response": [
+            {
+              "name": "200 Dernier relevé",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"reading\": {\n    \"id\": 42,\n    \"device_id\": 1,\n    \"device_name\": \"Capteur Temp/Humidité Salon\",\n    \"zone\": \"salon\",\n    \"temperature\": 28.5,\n    \"humidity\": 65.2,\n    \"gas_ppm\": 120.0,\n    \"air_quality\": 95.0,\n    \"motion\": false,\n    \"light_lux\": 85.0,\n    \"water_leak\": false,\n    \"recorded_at\": \"2026-06-04T10:30:00Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Historique (paginé)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/sensors/history",
+              "host": ["{{base_url}}"],
+              "path": ["api", "sensors", "history"],
+              "query": [
+                { "key": "from",  "value": "2026-06-01", "disabled": true },
+                { "key": "to",    "value": "2026-06-04", "disabled": true },
+                { "key": "page",  "value": "1",          "disabled": true },
+                { "key": "limit", "value": "20",         "disabled": true }
+              ]
+            },
+            "description": "Historique paginé. Filtres optionnels : `from`, `to` (date ISO), `page`, `limit` (max 100)."
+          },
+          "response": [
+            {
+              "name": "200 Historique",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"readings\": [...],\n  \"pagination\": {\n    \"page\": 1,\n    \"limit\": 20,\n    \"total\": 150,\n    \"totalPages\": 8\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Statistiques min/max/moy",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/sensors/stats?period=day",
+              "host": ["{{base_url}}"],
+              "path": ["api", "sensors", "stats"],
+              "query": [
+                { "key": "period",    "value": "day",  "description": "day | week | month | year" },
+                { "key": "device_id", "value": "",     "disabled": true, "description": "Filtrer sur un capteur" },
+                { "key": "limit",     "value": "30",   "disabled": true, "description": "Nombre de périodes (max 100)" }
+              ]
+            },
+            "description": "Statistiques agrégées par période pour chaque capteur.\n\n**Retourne pour chaque période :**\n- Température : min / max / moy\n- Humidité : min / max / moy\n- Gaz (ppm) : min / max / moy\n- Qualité d'air : min / max / moy\n- Luminosité : min / max / moy\n- Détections de mouvement (compteur)\n- Détections de fuite d'eau (compteur)\n- Nombre total de relevés\n\n**Périodes :** `day` = par jour · `week` = par semaine · `month` = par mois · `year` = par année"
+          },
+          "response": [
+            {
+              "name": "200 Statistiques journalières",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"period\": \"jour\",\n  \"stats\": [\n    {\n      \"device_id\": 1,\n      \"device_name\": \"Capteur Temp/Humidité Salon\",\n      \"zone\": \"salon\",\n      \"period_start\": \"2026-06-04T00:00:00.000Z\",\n      \"temp_min\": 21.5,\n      \"temp_max\": 31.2,\n      \"temp_avg\": 26.3,\n      \"humidity_min\": 48.0,\n      \"humidity_max\": 72.5,\n      \"humidity_avg\": 60.1,\n      \"gas_ppm_min\": 80.0,\n      \"gas_ppm_max\": 210.0,\n      \"gas_ppm_avg\": 130.5,\n      \"air_quality_min\": 88.0,\n      \"air_quality_max\": 99.0,\n      \"air_quality_avg\": 94.2,\n      \"light_lux_min\": 0.0,\n      \"light_lux_max\": 850.0,\n      \"light_lux_avg\": 310.7,\n      \"motion_detections\": 5,\n      \"water_leak_detections\": 0,\n      \"reading_count\": 288\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Historique par appareil",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/sensors/device/:device_id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "sensors", "device", ":device_id"],
+              "variable": [{ "key": "device_id", "value": "{{device_id}}" }],
+              "query": [
+                { "key": "page",  "value": "1",  "disabled": true },
+                { "key": "limit", "value": "20", "disabled": true }
+              ]
+            },
+            "description": "Relevés d'un capteur spécifique, paginés."
+          },
+          "response": [
+            {
+              "name": "200 Relevés du capteur",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"device\": { \"id\": 1, \"name\": \"Capteur Salon\", \"zone\": \"salon\" },\n  \"readings\": [...],\n  \"pagination\": { \"page\": 1, \"limit\": 20, \"total\": 50, \"totalPages\": 3 }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Actionneurs",
+      "description": "États et commandes des actionneurs (relais, ventilateur, alarme).",
+      "item": [
+        {
+          "name": "État de tous les actionneurs",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/actuators",
+              "host": ["{{base_url}}"],
+              "path": ["api", "actuators"]
+            },
+            "description": "Retourne l'état actuel (ON/OFF) de tous les actionneurs du compte."
+          },
+          "response": [
+            {
+              "name": "200 Liste des actionneurs",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"actuators\": [\n    {\n      \"id\": 2,\n      \"name\": \"Lumière Salon\",\n      \"zone\": \"salon\",\n      \"status\": \"ONLINE\",\n      \"state\": false,\n      \"triggered_by\": \"manual\",\n      \"updated_at\": \"2026-06-04T10:00:00Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Statistiques durée ON/OFF",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/actuators/stats?period=day",
+              "host": ["{{base_url}}"],
+              "path": ["api", "actuators", "stats"],
+              "query": [
+                { "key": "period",    "value": "day", "description": "day | week | month | year" },
+                { "key": "device_id", "value": "",    "disabled": true, "description": "Filtrer sur un actionneur" },
+                { "key": "limit",     "value": "30",  "disabled": true }
+              ]
+            },
+            "description": "Durée totale ON et OFF par période pour chaque actionneur.\n\n**Retourne par période :**\n- `on_duration_seconds` — secondes total en état ON\n- `off_duration_seconds` — secondes total en état OFF\n- `on_duration_formatted` — format lisible (ex. `3h 45min`)\n- `off_duration_formatted` — format lisible\n- `toggle_count` — nombre total de basculements\n- `on_count` — nombre d'allumages\n- `off_count` — nombre d'extinctions\n\n> Les durées sont calculées depuis l'historique des états (`actuator_state_history`) enregistré à chaque commande."
+          },
+          "response": [
+            {
+              "name": "200 Statistiques journalières",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"period\": \"jour\",\n  \"stats\": [\n    {\n      \"device_id\": 2,\n      \"device_name\": \"Lumière Salon\",\n      \"zone\": \"salon\",\n      \"period_start\": \"2026-06-04T00:00:00.000Z\",\n      \"on_duration_seconds\": 18000,\n      \"off_duration_seconds\": 68400,\n      \"on_duration_formatted\": \"5h 0min\",\n      \"off_duration_formatted\": \"19h 0min\",\n      \"toggle_count\": 6,\n      \"on_count\": 3,\n      \"off_count\": 3\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Envoyer une commande",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_id\": 2,\n  \"state\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/actuators/command",
+              "host": ["{{base_url}}"],
+              "path": ["api", "actuators", "command"]
+            },
+            "description": "Envoie une commande ON/OFF à un actionneur.\n\n- `device_id` : ID de l'appareil (type OUTPUT)\n- `state` : `true` = allumer · `false` = éteindre\n- `triggered_by` est automatiquement mis à `manual`"
+          },
+          "response": [
+            {
+              "name": "200 Commande envoyée",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"message\": \"Commande envoyée : Lumière Salon → ON\",\n  \"actuator\": {\n    \"id\": 2,\n    \"name\": \"Lumière Salon\",\n    \"zone\": \"salon\",\n    \"state\": true,\n    \"triggered_by\": \"manual\",\n    \"updated_at\": \"2026-06-04T10:31:00Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Actionneur introuvable",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Actionneur introuvable\" }"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Alertes",
+      "description": "Alertes de sécurité générées par les capteurs ESP32.",
+      "item": [
+        {
+          "name": "Lister les alertes",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/alerts",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alerts"],
+              "query": [
+                { "key": "resolved", "value": "false",    "disabled": true, "description": "true ou false" },
+                { "key": "severity", "value": "CRITICAL", "disabled": true, "description": "INFO, WARNING, CRITICAL" },
+                { "key": "type",     "value": "GAS_LEAK",  "disabled": true, "description": "FIRE, GAS_LEAK, INTRUSION, WATER_LEAK, HIGH_TEMP, POWER_CUT" },
+                { "key": "page",     "value": "1",         "disabled": true },
+                { "key": "limit",    "value": "20",        "disabled": true }
+              ]
+            },
+            "description": "Retourne toutes les alertes. Filtres optionnels : `resolved`, `severity`, `type`, pagination."
+          },
+          "response": [
+            {
+              "name": "200 Liste des alertes",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"alerts\": [\n    {\n      \"id\": 5,\n      \"type\": \"GAS_LEAK\",\n      \"zone\": \"cuisine\",\n      \"severity\": \"CRITICAL\",\n      \"message\": \"Concentration de gaz dépassée : 520 ppm\",\n      \"resolved\": false,\n      \"created_at\": \"2026-06-04T10:30:00Z\",\n      \"device_name\": \"Capteur Gaz Cuisine\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Obtenir une alerte",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/alerts/:id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alerts", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Détails d'une alerte par son ID."
+          },
+          "response": [
+            {
+              "name": "200 Alerte",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"alert\": {\n    \"id\": 5,\n    \"type\": \"GAS_LEAK\",\n    \"zone\": \"cuisine\",\n    \"severity\": \"CRITICAL\",\n    \"message\": \"Concentration de gaz dépassée : 520 ppm\",\n    \"resolved\": false,\n    \"created_at\": \"2026-06-04T10:30:00Z\",\n    \"device_name\": \"Capteur Gaz Cuisine\",\n    \"resolved_by_name\": null\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Résoudre une alerte",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/alerts/:id/resolve",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alerts", ":id", "resolve"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "description": "Marque une alerte comme résolue et enregistre l'utilisateur qui l'a résolue."
+          },
+          "response": [
+            {
+              "name": "200 Résolue",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"message\": \"Alerte marquée comme résolue\",\n  \"alert\": { \"id\": 5, \"type\": \"GAS_LEAK\", \"severity\": \"CRITICAL\", \"resolved\": true }\n}"
+            },
+            {
+              "name": "404 Introuvable",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Alerte introuvable ou déjà résolue\" }"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Configuration",
+      "description": "Paramètres système : seuils d'alerte, intervalles capteurs, mode automatique.",
+      "item": [
+        {
+          "name": "Obtenir la configuration",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{jwt_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/config",
+              "host": ["{{base_url}}"],
+              "path": ["api", "config"]
+            },
+            "description": "Retourne toutes les clés de configuration système.\n\n**Clés disponibles :**\n- `temp_max` — seuil de température (°C)\n- `gas_ppm_max` — seuil de concentration de gaz (ppm)\n- `light_threshold` — luminosité pour l'éclairage automatique (lux)\n- `sensor_interval` — intervalle de lecture ESP32 (secondes)\n- `auto_mode` — activer les automatisations (true/false)"
+          },
+          "response": [
+            {
+              "name": "200 Configuration",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"config\": [\n    { \"key\": \"auto_mode\",       \"value\": \"true\", \"description\": \"Enable intelligent automation rules\",              \"updated_at\": \"2026-06-04T00:00:00Z\" },\n    { \"key\": \"gas_ppm_max\",    \"value\": \"400\",  \"description\": \"Maximum gas concentration (ppm)\",                \"updated_at\": \"2026-06-04T00:00:00Z\" },\n    { \"key\": \"light_threshold\",\"value\": \"100\",  \"description\": \"Light level to trigger automatic lighting (lux)\",  \"updated_at\": \"2026-06-04T00:00:00Z\" },\n    { \"key\": \"sensor_interval\",\"value\": \"300\",  \"description\": \"ESP32 sensor read interval (seconds)\",             \"updated_at\": \"2026-06-04T00:00:00Z\" },\n    { \"key\": \"temp_max\",       \"value\": \"35\",   \"description\": \"Maximum temperature threshold (°C)\",              \"updated_at\": \"2026-06-04T00:00:00Z\" }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Modifier une configuration (ADMIN)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{jwt_token}}" },
+              { "key": "Content-Type",  "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"value\": \"40\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/config/:key",
+              "host": ["{{base_url}}"],
+              "path": ["api", "config", ":key"],
+              "variable": [{ "key": "key", "value": "temp_max", "description": "temp_max | gas_ppm_max | light_threshold | sensor_interval | auto_mode" }]
+            },
+            "description": "Met à jour la valeur d'une clé de configuration. Réservé aux **ADMIN**.\n\nExemple : passer `temp_max` à `40` pour déclencher les alertes à 40°C au lieu de 35°C."
+          },
+          "response": [
+            {
+              "name": "200 Mis à jour",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"message\": \"Configuration mise à jour\",\n  \"config\": {\n    \"key\": \"temp_max\",\n    \"value\": \"40\",\n    \"description\": \"Maximum temperature threshold (°C)\",\n    \"updated_at\": \"2026-06-04T11:00:00Z\"\n  }\n}"
+            },
+            {
+              "name": "404 Clé introuvable",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{ \"error\": \"Clé de configuration \\\"unknown_key\\\" introuvable\" }"
             }
           ]
         }

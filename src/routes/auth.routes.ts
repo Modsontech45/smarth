@@ -9,7 +9,14 @@ import {
   getMe,
   regenerateApiKey,
 } from '../controllers/auth.controller';
+import {
+  inviteUser,
+  acceptInvite,
+  getInvitations,
+  cancelInvitation,
+} from '../controllers/invite.controller';
 import { verifyJWT } from '../middleware/auth.middleware';
+import { requireRole } from '../middleware/role.middleware';
 
 const router = Router();
 
@@ -193,5 +200,93 @@ router.get('/me', verifyJWT, getMe);
  *         description: Non authentifié
  */
 router.post('/regenerate-api-key', verifyJWT, regenerateApiKey);
+
+/**
+ * @swagger
+ * /api/auth/invite:
+ *   post:
+ *     summary: Inviter un utilisateur ou un invité (ADMIN)
+ *     tags: [Authentification]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email]
+ *             properties:
+ *               email: { type: string, format: email }
+ *               role:  { type: string, enum: [USER, GUEST], default: USER }
+ *     responses:
+ *       201:
+ *         description: Invitation envoyée par email (lien valable 48h)
+ *       409:
+ *         description: Email déjà inscrit ou invitation déjà en attente
+ *       403:
+ *         description: Permissions insuffisantes
+ */
+router.post('/invite', verifyJWT, requireRole('ADMIN'), inviteUser);
+
+/**
+ * @swagger
+ * /api/auth/accept-invite:
+ *   post:
+ *     summary: Accepter une invitation et créer son compte
+ *     tags: [Authentification]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [token, name, password]
+ *             properties:
+ *               token:    { type: string }
+ *               name:     { type: string }
+ *               password: { type: string, minLength: 8 }
+ *     responses:
+ *       201:
+ *         description: Compte créé avec le rôle assigné par l'ADMIN
+ *       400:
+ *         description: Token invalide/expiré ou données manquantes
+ */
+router.post('/accept-invite', acceptInvite);
+
+/**
+ * @swagger
+ * /api/auth/invitations:
+ *   get:
+ *     summary: Lister toutes les invitations envoyées (ADMIN)
+ *     tags: [Authentification]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Liste des invitations
+ */
+router.get('/invitations', verifyJWT, requireRole('ADMIN'), getInvitations);
+
+/**
+ * @swagger
+ * /api/auth/invitations/{id}:
+ *   delete:
+ *     summary: Annuler une invitation en attente (ADMIN)
+ *     tags: [Authentification]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Invitation annulée
+ *       404:
+ *         description: Invitation introuvable ou déjà acceptée
+ */
+router.delete('/invitations/:id', verifyJWT, requireRole('ADMIN'), cancelInvitation);
 
 export default router;
