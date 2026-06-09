@@ -63,6 +63,20 @@ export const getCommands = async (req: Request, res: Response) => {
     [userId],
   );
   res.json({ commands: rows });
+
+  // ESP32 can reach us → all its relay devices are online. Update async after responding.
+  try {
+    const { rows: online } = await pool.query<{ id: number }>(
+      `UPDATE devices SET status='ONLINE', last_seen=NOW()
+       WHERE owner_id=$1 AND type='OUTPUT' RETURNING id`,
+      [userId],
+    );
+    for (const d of online) {
+      emitToUser(userId, 'device:status', { deviceId: d.id, status: 'ONLINE' });
+    }
+  } catch (err) {
+    console.error('[ESP32] getCommands status update error:', err);
+  }
 };
 
 // POST /api/esp32/state  — physical switch pressed on the ESP32
