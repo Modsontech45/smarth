@@ -39,12 +39,13 @@ export const postReadings = async (req: Request, res: Response) => {
       [device.id],
     );
 
-    // Push sensor update to all browser clients of this user instantly
+    const now = new Date().toISOString();
     emitToUser(device.owner_id, 'sensor:update', {
       deviceId: device.id, deviceName: device.name, zone: device.zone,
       temperature, humidity, gas_ppm, air_quality, motion, light_lux, water_leak,
-      timestamp: new Date().toISOString(),
+      timestamp: now,
     });
+    emitToUser(device.owner_id, 'device:status', { deviceId: device.id, status: 'ONLINE' });
   } catch (err) {
     console.error('[ESP32] postReadings error:', err);
   }
@@ -191,13 +192,15 @@ export const postHeartbeat = async (req: Request, res: Response) => {
   res.json({ ok: true });
 
   try {
-    await pool.query(
+    const { rows } = await pool.query<{ id: number }>(
       `UPDATE devices SET status='ONLINE', last_seen=NOW()
-       WHERE owner_id=$1 AND device_key = ANY($2::text[])`,
+       WHERE owner_id=$1 AND device_key = ANY($2::text[])
+       RETURNING id`,
       [userId, device_keys],
     );
 
-    emitToUser(userId, 'device:online', { device_keys });
+    const deviceIds = rows.map(r => r.id);
+    emitToUser(userId, 'device:online', { deviceIds });
   } catch (err) {
     console.error('[ESP32] postHeartbeat error:', err);
   }
