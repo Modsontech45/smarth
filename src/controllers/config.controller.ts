@@ -20,18 +20,16 @@ export const updateConfig = async (req: AuthenticatedRequest, res: Response): Pr
     return;
   }
 
-  const result = await pool.query(
-    `UPDATE system_config
-     SET value = $1, updated_at = NOW()
-     WHERE key = $2
-     RETURNING key, value, description, updated_at`,
-    [String(value), key]
-  );
+  const { description } = req.body;
 
-  if ((result.rowCount ?? 0) === 0) {
-    res.status(404).json({ error: `Clé de configuration "${key}" introuvable` });
-    return;
-  }
+  const result = await pool.query(
+    `INSERT INTO system_config (key, value, description)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (key) DO UPDATE
+       SET value = EXCLUDED.value, updated_at = NOW()
+     RETURNING key, value, description, updated_at`,
+    [key, String(value), description ?? null]
+  );
 
   res.json({ message: 'Configuration mise à jour', config: result.rows[0] });
 };

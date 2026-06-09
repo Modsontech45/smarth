@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getLatest, getHistory, getByDevice } from '../controllers/sensors.controller';
+import { getLatest, getHistory, getByDevice, getSensorSummary } from '../controllers/sensors.controller';
 import { getSensorStats } from '../controllers/sensors.stats.controller';
 import { verifyJWT } from '../middleware/auth.middleware';
 
@@ -28,6 +28,7 @@ router.use(verifyJWT);
  *         description: Aucun relevé disponible
  */
 router.get('/latest', getLatest);
+router.get('/summary', getSensorSummary);
 
 /**
  * @swagger

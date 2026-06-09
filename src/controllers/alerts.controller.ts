@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { pool } from '../db/pool';
 import { AuthenticatedRequest } from '../types';
+import { emitToUser } from '../socket';
 
 // ─── GET /api/alerts ─────────────────────────────────────────
 export const getAlerts = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -84,5 +85,6 @@ export const resolveAlert = async (req: AuthenticatedRequest, res: Response): Pr
     return;
   }
 
+  emitToUser(req.user!.userId, 'alert:resolved', { id: result.rows[0].id });
   res.json({ message: 'Alerte marquée comme résolue', alert: result.rows[0] });
 };

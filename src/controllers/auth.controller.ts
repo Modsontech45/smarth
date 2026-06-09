@@ -18,54 +18,59 @@ function signToken(payload: JWTPayload): string {
 
 // ─── POST /api/auth/register ────────────────────────────────
 export const register = async (req: Request, res: Response): Promise<void> => {
-  const { name, email, password } = req.body;
-
-  if (!name || !email || !password) {
-    res.status(400).json({ error: 'Le nom, l\'email et le mot de passe sont obligatoires' });
-    return;
-  }
-  if (password.length < 8) {
-    res.status(400).json({ error: 'Le mot de passe doit contenir au moins 8 caractères' });
-    return;
-  }
-
-  const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
-  if ((existing.rowCount ?? 0) > 0) {
-    res.status(409).json({ error: 'Cet email est déjà utilisé' });
-    return;
-  }
-
-  const hashedPassword     = await bcrypt.hash(password, SALT_ROUNDS);
-  const apiKey             = crypto.randomBytes(Number(process.env.API_KEY_BYTES) || 32).toString('hex');
-  const emailVerifyToken   = crypto.randomBytes(32).toString('hex');
-  const emailVerifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 h
-
-  const result = await pool.query(
-    `INSERT INTO users
-       (name, email, password, api_key, email_verify_token, email_verify_expires)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     RETURNING id, name, email, role, api_key`,
-    [name, email.toLowerCase(), hashedPassword, apiKey, emailVerifyToken, emailVerifyExpires]
-  );
-
-  const user = result.rows[0];
-
   try {
-    await sendVerificationEmail(email, name, emailVerifyToken);
-  } catch (err) {
-    console.error('Échec de l\'envoi de l\'email de vérification :', err);
-  }
+    const { name, email, password } = req.body;
 
-  res.status(201).json({
-    message: 'Compte créé avec succès. Veuillez vérifier votre email pour activer votre compte.',
-    api_key: user.api_key,
-    user: {
-      id:    user.id,
-      name:  user.name,
-      email: user.email,
-      role:  user.role,
-    },
-  });
+    if (!name || !email || !password) {
+      res.status(400).json({ error: 'Le nom, l\'email et le mot de passe sont obligatoires' });
+      return;
+    }
+    if (password.length < 8) {
+      res.status(400).json({ error: 'Le mot de passe doit contenir au moins 8 caractères' });
+      return;
+    }
+
+    const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email.toLowerCase()]);
+    if ((existing.rowCount ?? 0) > 0) {
+      res.status(409).json({ error: 'Cet email est déjà utilisé' });
+      return;
+    }
+
+    const hashedPassword     = await bcrypt.hash(password, SALT_ROUNDS);
+    const apiKey             = crypto.randomBytes(Number(process.env.API_KEY_BYTES) || 32).toString('hex');
+    const emailVerifyToken   = crypto.randomBytes(32).toString('hex');
+    const emailVerifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 h
+
+    const result = await pool.query(
+      `INSERT INTO users
+         (name, email, password, role, api_key, email_verify_token, email_verify_expires)
+       VALUES ($1, $2, $3, 'ADMIN', $4, $5, $6)
+       RETURNING id, name, email, role, api_key`,
+      [name, email.toLowerCase(), hashedPassword, apiKey, emailVerifyToken, emailVerifyExpires]
+    );
+
+    const user = result.rows[0];
+
+    // Respond immediately — never block registration on email delivery
+    res.status(201).json({
+      message: 'Compte créé avec succès. Veuillez vérifier votre email pour activer votre compte.',
+      api_key: user.api_key,
+      user: {
+        id:    user.id,
+        name:  user.name,
+        email: user.email,
+        role:  user.role,
+      },
+    });
+
+    // Fire-and-forget: send verification email in background
+    sendVerificationEmail(email, name, emailVerifyToken).catch(emailErr => {
+      console.error('Échec de l\'envoi de l\'email de vérification :', emailErr);
+    });
+  } catch (err: any) {
+    console.error('Erreur register:', err);
+    res.status(500).json({ error: 'Erreur interne du serveur' });
+  }
 };
 
 // ─── POST /api/auth/login ────────────────────────────────────
@@ -181,13 +186,12 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
     [token, expires, user.id]
   );
 
-  try {
-    await sendPasswordResetEmail(email, user.name, token);
-  } catch (err) {
-    console.error('Échec de l\'envoi de l\'email de réinitialisation :', err);
-  }
-
   res.json({ message: 'Si cet email est enregistré, un lien de réinitialisation a été envoyé.' });
+
+  // Fire-and-forget
+  sendPasswordResetEmail(email, user.name, token).catch(err => {
+    console.error('Échec de l\'envoi de l\'email de réinitialisation :', err);
+  });
 };
 
 // ─── POST /api/auth/reset-password ──────────────────────────

@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import { pool } from '../db/pool';
 import { AuthenticatedRequest } from '../types';
+import { emitToUser } from '../socket';
+import { sendToESP32 } from '../esp32-ws';
 
 // ─── GET /api/actuators ──────────────────────────────────────
 export const getActuators = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -32,7 +34,7 @@ export const sendCommand = async (req: AuthenticatedRequest, res: Response): Pro
 
   // Vérifier que l'appareil est un OUTPUT et appartient au compte
   const deviceResult = await pool.query(
-    `SELECT id, name, zone, status FROM devices
+    `SELECT id, name, zone, status, device_key FROM devices
      WHERE id = $1 AND owner_id = $2 AND type = 'OUTPUT'`,
     [device_id, req.user!.userId]
   );
@@ -60,15 +62,19 @@ export const sendCommand = async (req: AuthenticatedRequest, res: Response): Pro
     [device_id, state]
   );
 
-  res.json({
-    message: `Commande envoyée : ${device.name} → ${state ? 'ON' : 'OFF'}`,
-    actuator: {
-      id:           device.id,
-      name:         device.name,
-      zone:         device.zone,
-      state,
-      triggered_by: 'manual',
-      updated_at:   new Date().toISOString(),
-    },
+  const actuator = {
+    id: device.id, name: device.name, zone: device.zone,
+    state, triggeredBy: 'manual', updated_at: new Date().toISOString(),
+  };
+
+  // Push to browser tabs
+  emitToUser(req.user!.userId, 'actuator:update', actuator);
+
+  // Push directly to ESP32 via WebSocket — relay switches instantly
+  sendToESP32(req.user!.userId, 'actuator:command', {
+    deviceKey: device.device_key,
+    state,
   });
+
+  res.json({ message: `Commande envoyée : ${device.name} → ${state ? 'ON' : 'OFF'}`, actuator });
 };

@@ -10,7 +10,7 @@ const VALID_DATA_TYPES   = ['boolean', 'float', 'integer', 'percentage'];
 const DEVICE_FIELDS = `
   id, name, type, status, zone, description,
   signal_type, data_type, unit, min_value, max_value, gpio_pin,
-  created_at, updated_at
+  device_key, created_at, updated_at
 `;
 
 function validateConfig(signal_type?: string, data_type?: string, res?: Response): boolean {
@@ -96,10 +96,9 @@ export const createDevice = async (req: AuthenticatedRequest, res: Response): Pr
   }
   if (!validateConfig(signal_type, data_type, res)) return;
 
-  // Déduire les valeurs par défaut selon le signal_type si non fourni
-  const defaults = getDefaults(signal_type.toLowerCase(), String(type).toUpperCase());
-
+  const defaults  = getDefaults(signal_type.toLowerCase(), String(type).toUpperCase());
   const deviceKey = crypto.randomBytes(Number(process.env.DEVICE_TOKEN_BYTES) || 32).toString('hex');
+  const resolvedUnit = unit ?? defaults.unit;
 
   const result = await pool.query(
     `INSERT INTO devices
@@ -116,7 +115,7 @@ export const createDevice = async (req: AuthenticatedRequest, res: Response): Pr
       deviceKey,
       signal_type.toLowerCase(),
       data_type.toLowerCase(),
-      unit       ?? defaults.unit,
+      resolvedUnit,
       min_value  ?? defaults.min_value,
       max_value  ?? defaults.max_value,
       gpio_pin   ?? null,
@@ -125,10 +124,11 @@ export const createDevice = async (req: AuthenticatedRequest, res: Response): Pr
 
   const device = result.rows[0];
 
-  res.status(201).json({
-    message: 'Appareil ajouté avec succès',
-    device,
-  });
+  res.status(201).json({ message: 'Appareil ajouté avec succès', device });
+
+  // Fire-and-forget: seed default data after responding
+  seedDeviceData(device.id, type.toUpperCase(), signal_type.toLowerCase(), resolvedUnit, name)
+    .catch(err => console.error('seedDeviceData error:', err));
 };
 
 // ─── PUT /api/devices/:id ────────────────────────────────────
@@ -238,6 +238,91 @@ export const getSignalTypes = (_req: AuthenticatedRequest, res: Response): void 
     ],
   });
 };
+
+// ─── Auto-seed default data after device creation ────────────
+async function seedDeviceData(
+  deviceId: number,
+  deviceType: string,
+  signalType: string,
+  unit: string,
+  name: string,
+): Promise<void> {
+  const u = (unit  ?? '').toLowerCase();
+  const n = (name  ?? '').toLowerCase();
+  const jit = (range: number) => (Math.random() - 0.5) * 2 * range;
+
+  if (deviceType === 'OUTPUT') {
+    // Ensure an actuator_state row exists so the device appears in the actuators list
+    await pool.query(
+      `INSERT INTO actuator_states (device_id, state)
+       VALUES ($1, false)
+       ON CONFLICT (device_id) DO NOTHING`,
+      [deviceId],
+    );
+    return;
+  }
+
+  // INPUT — insert 5 sample readings (t-2h … t, every 30 min)
+  const now = Date.now();
+  for (let i = 0; i < 5; i++) {
+    const ts      = new Date(now - (4 - i) * 30 * 60 * 1000);
+    const hour    = ts.getHours();
+    const daytime = hour >= 7 && hour < 21;
+    const wave    = Math.sin((i / 4) * Math.PI);
+
+    let temperature: number | null = null;
+    let humidity:    number | null = null;
+    let gas_ppm:     number | null = null;
+    let air_quality: number | null = null;
+    let motion:      boolean | null = null;
+    let light_lux:   number | null = null;
+    let water_leak:  boolean | null = null;
+
+    if (signalType === 'dht22' || signalType === 'dht11') {
+      temperature = +(21 + wave * 4 + jit(1)).toFixed(2);
+      humidity    = +(55 + wave * 8 + jit(2)).toFixed(2);
+      air_quality = +(75 + jit(5)).toFixed(2);
+
+    } else if (u.includes('ppm') || signalType === 'uart' ||
+               n.includes('gaz') || n.includes('gas') || n.includes('fumée') || n.includes('co2')) {
+      gas_ppm     = +(120 + wave * 50 + jit(20)).toFixed(2);
+      air_quality = +(80 - (gas_ppm / 100)).toFixed(2);
+
+    } else if (u.includes('lux') || n.includes('lum') || n.includes('light') || n.includes('luminosité')) {
+      light_lux   = +(daytime ? 300 + wave * 200 + jit(50) : 5 + jit(2)).toFixed(2);
+
+    } else if (n.includes('pir') || n.includes('mouvement') || n.includes('motion') || n.includes('présence')) {
+      motion      = false;
+
+    } else if (n.includes('fuite') || n.includes('water') || n.includes('eau') || n.includes('inond')) {
+      water_leak  = false;
+
+    } else if (u.includes('°c') || u === 'c' || u.includes('celsius') || u.includes('temp') ||
+               n.includes('temp') || n.includes('therm')) {
+      temperature = +(22 + wave * 3 + jit(1)).toFixed(2);
+      air_quality = +(75 + jit(5)).toFixed(2);
+
+    } else if (u === '%' || u.includes('humid')) {
+      humidity    = +(58 + wave * 8 + jit(2)).toFixed(2);
+
+    } else {
+      // Generic analog / i2c / pwm
+      air_quality = +(75 + wave * 10 + jit(5)).toFixed(2);
+    }
+
+    await pool.query(
+      `INSERT INTO sensor_readings
+         (device_id, temperature, humidity, gas_ppm, air_quality,
+          motion, light_lux, water_leak, recorded_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [deviceId, temperature, humidity, gas_ppm, air_quality,
+       motion, light_lux, water_leak, ts.toISOString()],
+    );
+  }
+
+  // Mark ONLINE since it now has data
+  await pool.query("UPDATE devices SET status = 'ONLINE' WHERE id = $1", [deviceId]);
+}
 
 // ─── Valeurs par défaut selon le signal_type ────────────────
 function getDefaults(signal_type: string, device_type: string) {

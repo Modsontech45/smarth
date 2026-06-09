@@ -75,6 +75,44 @@ export const getHistory = async (req: AuthenticatedRequest, res: Response): Prom
   });
 };
 
+// ─── GET /api/sensors/summary ───────────────────────────────
+// Latest reading per INPUT device — includes devices with no readings yet
+export const getSensorSummary = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const result = await pool.query(
+    `SELECT
+       d.id          AS device_id,
+       d.name        AS device_name,
+       d.zone,
+       d.signal_type,
+       d.data_type,
+       d.unit,
+       d.min_value,
+       d.max_value,
+       d.status,
+       sr.temperature,
+       sr.humidity,
+       sr.gas_ppm,
+       sr.air_quality,
+       sr.motion,
+       sr.light_lux,
+       sr.water_leak,
+       sr.recorded_at
+     FROM devices d
+     LEFT JOIN LATERAL (
+       SELECT temperature, humidity, gas_ppm, air_quality,
+              motion, light_lux, water_leak, recorded_at
+       FROM sensor_readings
+       WHERE device_id = d.id
+       ORDER BY recorded_at DESC
+       LIMIT 1
+     ) sr ON true
+     WHERE d.owner_id = $1 AND d.type = 'INPUT'
+     ORDER BY d.zone, d.name`,
+    [req.user!.userId]
+  );
+  res.json({ readings: result.rows });
+};
+
 // ─── GET /api/sensors/device/:device_id ─────────────────────
 export const getByDevice = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const { device_id } = req.params;

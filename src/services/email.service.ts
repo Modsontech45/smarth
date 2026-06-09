@@ -1,9 +1,12 @@
 import nodemailer from 'nodemailer';
 
 const transporter = nodemailer.createTransport({
-  host:   process.env.SMTP_HOST || 'smtp.gmail.com',
-  port:   Number(process.env.SMTP_PORT) || 587,
-  secure: false,
+  host:              process.env.SMTP_HOST || 'smtp.gmail.com',
+  port:              Number(process.env.SMTP_PORT) || 587,
+  secure:            false,
+  connectionTimeout: 8000,
+  greetingTimeout:   8000,
+  socketTimeout:     8000,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
@@ -14,7 +17,7 @@ const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 const FROM       = process.env.SMTP_FROM  || 'SmartHome <noreply@smarthome.local>';
 
 export async function sendVerificationEmail(to: string, name: string, token: string): Promise<void> {
-  const link = `${CLIENT_URL}/verify-email?token=${token}`;
+  const link = `${CLIENT_URL}/verify-email/${token}`;
   await transporter.sendMail({
     from:    FROM,
     to,

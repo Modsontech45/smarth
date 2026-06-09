@@ -269,6 +269,9 @@ npx ts-node scripts/migrate2.ts
 
 # Migration 3 — historique actionneurs + index analytics
 npx ts-node scripts/migrate3.ts
+
+# Migration 4 — configuration technique des appareils (signal_type, data_type, unit, plage, gpio_pin)
+npx ts-node scripts/migrate4.ts
 ```
 
 ### Tables créées
@@ -440,15 +443,78 @@ L'ADMIN peut ensuite inviter des membres via `POST /api/auth/invite` — un emai
 | GET | `/api/devices?type=INPUT` | Filtrer par type (INPUT/OUTPUT) | JWT |
 | GET | `/api/devices?status=ONLINE` | Filtrer par statut | JWT |
 | GET | `/api/devices?zone=salon` | Filtrer par zone | JWT |
+| GET | `/api/devices?signal_type=analog` | Filtrer par type de signal | JWT |
+| GET | `/api/devices/signal-types` | Référence des types de signaux disponibles | JWT |
 | GET | `/api/devices/:id` | Obtenir un appareil par ID | JWT |
 | POST | `/api/devices` | Ajouter un appareil → génère `device_key` | ADMIN |
-| PUT | `/api/devices/:id` | Modifier nom, zone, description | ADMIN |
+| PUT | `/api/devices/:id` | Modifier l'appareil (tous les champs) | ADMIN |
 | PATCH | `/api/devices/:id/status` | Mettre à jour le statut (ONLINE/OFFLINE) | ADMIN |
 | DELETE | `/api/devices/:id` | Supprimer un appareil (cascade) | ADMIN |
 
-**Ajouter un appareil :**
+#### Configuration technique des appareils
+
+Chaque appareil possède une configuration qui décrit comment l'ESP32 lit ou contrôle le composant :
+
+| Champ | Type | Obligatoire | Description |
+|-------|------|-------------|-------------|
+| `signal_type` | string | Non (défaut : `digital`) | Protocole de communication |
+| `data_type` | string | Non (défaut : `boolean`) | Type de la valeur produite/acceptée |
+| `unit` | string | Non | Unité de mesure (°C, %, ppm, lux…) |
+| `min_value` | float | Non | Valeur minimale attendue |
+| `max_value` | float | Non | Valeur maximale attendue |
+| `gpio_pin` | integer | Non | Numéro de broche GPIO ESP32 |
+
+#### Types de signaux (`signal_type`)
+
+| Valeur | Protocole | Cas d'usage typique | Défauts appliqués |
+|--------|-----------|---------------------|-------------------|
+| `digital` | HIGH/LOW GPIO | Relais, buzzer, PIR, fuite d'eau | boolean · 0–1 |
+| `analog` | ADC 0–4095 | MQ-2 gaz, LDR lumière, capteur eau | float · 0–4095 |
+| `pwm` | PWM 0–255 | Variateur lumière, vitesse ventilateur | percentage · 0–255 |
+| `dht22` | 1-Wire DHT | Capteur DHT22 température + humidité | float · -40–80°C |
+| `i2c` | I2C | BMP280 pression, capteurs I2C | float · 0–1100 Pa |
+| `uart` | UART/Serial | MHZ19 CO2, PMS5003 particules | float · 0–5000 ppm |
+
+#### Types de données (`data_type`)
+
+| Valeur | Description | Plage |
+|--------|-------------|-------|
+| `boolean` | Vrai/faux (ON/OFF) | 0 ou 1 |
+| `float` | Valeur décimale | ex. -40.0 à 80.0 |
+| `integer` | Valeur entière | ex. 0 à 4095 |
+| `percentage` | Pourcentage | 0 à 100 |
+
+> Appeler `GET /api/devices/signal-types` pour obtenir la liste complète avec les unités typiques — idéal pour alimenter un formulaire frontend dynamique.
+
+**Ajouter un appareil (corps complet) :**
 ```json
-{ "name": "Capteur Gaz Salon", "type": "INPUT", "zone": "salon", "description": "Capteur MQ-2" }
+{
+  "name": "Capteur Gaz Salon",
+  "type": "INPUT",
+  "zone": "salon",
+  "description": "Capteur MQ-2 — détection gaz et fumée",
+  "signal_type": "analog",
+  "data_type": "float",
+  "unit": "ppm",
+  "min_value": 0,
+  "max_value": 1000,
+  "gpio_pin": 34
+}
+```
+
+**Ajouter un actionneur PWM :**
+```json
+{
+  "name": "Ventilateur Salon",
+  "type": "OUTPUT",
+  "zone": "salon",
+  "signal_type": "pwm",
+  "data_type": "percentage",
+  "unit": "%",
+  "min_value": 0,
+  "max_value": 100,
+  "gpio_pin": 19
+}
 ```
 
 **Réponse (201) — `device_key` retournée une seule fois :**
@@ -457,12 +523,15 @@ L'ADMIN peut ensuite inviter des membres via `POST /api/auth/invite` — un emai
   "message": "Appareil ajouté avec succès",
   "device": {
     "id": 3, "name": "Capteur Gaz Salon", "type": "INPUT",
-    "zone": "salon", "device_key": "f7e3a1c9b2d4e5f6..."
+    "status": "OFFLINE", "zone": "salon",
+    "signal_type": "analog", "data_type": "float",
+    "unit": "ppm", "min_value": 0, "max_value": 1000, "gpio_pin": 34,
+    "device_key": "f7e3a1c9b2d4e5f6..."
   }
 }
 ```
 
-> ⚠️ **`device_key` à flasher dans l'ESP32 avec l'`api_key` du compte.**
+> ⚠️ **`device_key` à flasher dans l'ESP32 avec l'`api_key` du compte. Retournée une seule fois.**
 
 ---
 
@@ -947,7 +1016,7 @@ pm2 save && pm2 startup
 
 - [ ] Cloner le dépôt et exécuter `npm install`
 - [ ] Copier `.env.example` → `.env` et remplir les valeurs
-- [ ] Exécuter les 3 migrations (`migrate.ts`, `migrate2.ts`, `migrate3.ts`)
+- [ ] Exécuter les 4 migrations (`migrate.ts`, `migrate2.ts`, `migrate3.ts`, `migrate4.ts`)
 - [ ] Promouvoir le premier compte en ADMIN via SQL
 - [ ] Exécuter `npm run dev`
 - [ ] Ouvrir `http://localhost:3000/api-docs`
