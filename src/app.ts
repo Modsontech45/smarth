@@ -63,6 +63,17 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// ── Server time (for frontend timezone display) ───────────────
+app.get('/api/time', (_req, res) => {
+  const now = new Date();
+  res.json({
+    iso:       now.toISOString(),
+    timestamp: now.getTime(),
+    hhmm:      `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+    timezone:  Intl.DateTimeFormat().resolvedOptions().timeZone,
+  });
+});
+
 // ── Global error handler ──────────────────────────────────────
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Unhandled error:', err);
