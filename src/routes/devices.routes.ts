@@ -9,6 +9,7 @@ import {
   getSignalTypes,
 } from '../controllers/devices.controller';
 import { getDeviceUptime } from '../controllers/devices.uptime.controller';
+import { getActuatorAnalytics, resetData } from '../controllers/devices.analytics.controller';
 import { verifyJWT } from '../middleware/auth.middleware';
 import { requireRole } from '../middleware/role.middleware';
 
@@ -29,8 +30,10 @@ router.use(verifyJWT);
  *       200:
  *         description: Référence complète des signal_type et data_type
  */
-router.get('/signal-types', getSignalTypes);
-router.get('/uptime',       getDeviceUptime);
+router.get('/signal-types',         getSignalTypes);
+router.get('/uptime',               getDeviceUptime);
+router.get('/actuator-analytics',   getActuatorAnalytics);
+router.post('/reset-data',          resetData);
 
 /**
  * @swagger
