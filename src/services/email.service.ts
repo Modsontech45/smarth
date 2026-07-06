@@ -14,14 +14,14 @@ const transporter = nodemailer.createTransport({
 });
 
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
-const FROM       = process.env.SMTP_FROM  || 'SmartHome <noreply@smarthome.local>';
+const FROM       = process.env.SMTP_FROM  || 'Skylorx <noreply@skylorx.io>';
 
 export async function sendVerificationEmail(to: string, name: string, token: string): Promise<void> {
   const link = `${CLIENT_URL}/verify-email/${token}`;
   await transporter.sendMail({
     from:    FROM,
     to,
-    subject: 'Vérifiez votre compte SmartHome',
+    subject: 'Vérifiez votre compte Skylorx',
     html: `
       <h2>Bonjour ${name},</h2>
       <p>Merci de vous être inscrit. Cliquez sur le lien ci-dessous pour vérifier votre adresse email :</p>
@@ -43,10 +43,10 @@ export async function sendInvitationEmail(
   await transporter.sendMail({
     from:    FROM,
     to,
-    subject: `${inviterName} vous invite à rejoindre SmartHome`,
+    subject: `${inviterName} vous invite à rejoindre Skylorx`,
     html: `
       <h2>Vous avez été invité !</h2>
-      <p><strong>${inviterName}</strong> vous invite à rejoindre son système SmartHome en tant que <strong>${roleLabel}</strong>.</p>
+      <p><strong>${inviterName}</strong> vous invite à rejoindre son système Skylorx en tant que <strong>${roleLabel}</strong>.</p>
       <p>Cliquez sur le bouton ci-dessous pour créer votre compte :</p>
       <p><a href="${link}" style="background:#16a34a;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;">Accepter l'invitation</a></p>
       <p>Ce lien expire dans <strong>48 heures</strong>.</p>
@@ -60,7 +60,7 @@ export async function sendPasswordResetEmail(to: string, name: string, token: st
   await transporter.sendMail({
     from:    FROM,
     to,
-    subject: 'Réinitialisation de votre mot de passe SmartHome',
+    subject: 'Réinitialisation de votre mot de passe Skylorx',
     html: `
       <h2>Bonjour ${name},</h2>
       <p>Vous avez demandé une réinitialisation de mot de passe. Cliquez sur le lien ci-dessous pour définir un nouveau mot de passe :</p>

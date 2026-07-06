@@ -1,4 +1,4 @@
-import { pool } from './db/pool';
+import { pool, dbIsOnline } from './db/pool';
 import { emitToUser } from './socket';
 import { sendToESP32 } from './esp32-ws';
 import https from 'https';
@@ -67,6 +67,7 @@ async function fireAutomation(
 }
 
 async function evaluateTimeBased(): Promise<void> {
+  if (!dbIsOnline()) return;
   const now  = new Date();
   const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
@@ -100,6 +101,7 @@ async function evaluateTimeBased(): Promise<void> {
 }
 
 async function evaluateSensorThreshold(): Promise<void> {
+  if (!dbIsOnline()) return;
   try {
     const { rows } = await pool.query<{
       id: number; owner_id: number;
@@ -158,6 +160,7 @@ async function evaluateSensorThreshold(): Promise<void> {
 export function startScheduler(): void {
   // Offline detection — every 30 s
   setInterval(async () => {
+    if (!dbIsOnline()) return;
     try {
       const { rows } = await pool.query<{ id: number; owner_id: number }>(
         `UPDATE devices SET status = 'OFFLINE'

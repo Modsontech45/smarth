@@ -14,6 +14,9 @@ import adminRoutes        from './routes/admin.routes';
 import esp32Routes        from './routes/esp32.routes';
 import energyRoutes       from './routes/energy.routes';
 import camerasRoutes      from './routes/cameras.routes';
+import subscriptionRoutes from './routes/subscription.routes';
+import transcribeRoute    from './routes/transcribe.route';
+import voiceRoute         from './routes/voice.route';
 
 const app = express();
 
@@ -25,9 +28,9 @@ const swaggerSpec = swaggerJSDoc({
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'SmartHome API',
+      title: 'Skylorx API',
       version: '1.0.0',
-      description: 'SmartHome IoT Backend REST API',
+      description: 'Skylorx IoT Backend REST API',
     },
     components: {
       securitySchemes: {
@@ -56,7 +59,10 @@ app.use('/api/automations', automationsRoutes);
 app.use('/api/admin',       adminRoutes);
 app.use('/api/esp32',       esp32Routes);
 app.use('/api/energy',      energyRoutes);
-app.use('/api/cameras',     camerasRoutes);
+app.use('/api/cameras',       camerasRoutes);
+app.use('/api/subscription',  subscriptionRoutes);
+app.use('/api/transcribe',    transcribeRoute);
+app.use('/api/voice',         voiceRoute);
 
 // ── Health check ─────────────────────────────────────────────
 app.get('/health', (_req, res) => {

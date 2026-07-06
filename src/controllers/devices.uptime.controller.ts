@@ -121,18 +121,28 @@ export const getDeviceUptime = async (req: AuthenticatedRequest, res: Response):
     FROM   all_states
   ),
   actuator_on_time AS (
-    SELECT device_id,
+    SELECT swn.device_id,
            COALESCE(SUM(
-             CASE WHEN state = true
+             CASE WHEN swn.state = true
                   THEN EXTRACT(EPOCH FROM (
-                    LEAST(COALESCE(next_at, $3::timestamptz), $3::timestamptz) - changed_at
+                    LEAST(
+                      COALESCE(swn.next_at,
+                        -- Cap open ON intervals at last_seen when ESP32 is offline
+                        CASE WHEN d.status = 'OFFLINE' AND d.last_seen IS NOT NULL
+                             THEN LEAST(d.last_seen, $3::timestamptz)
+                             ELSE $3::timestamptz
+                        END
+                      ),
+                      $3::timestamptz
+                    ) - swn.changed_at
                   ))
                   ELSE 0
              END
            ), 0) AS online_seconds
-    FROM   state_with_next
-    WHERE  changed_at < $3::timestamptz
-    GROUP  BY device_id
+    FROM   state_with_next swn
+    JOIN   devices d ON d.id = swn.device_id
+    WHERE  swn.changed_at < $3::timestamptz
+    GROUP  BY swn.device_id
   )
 
   -- ── Final result ─────────────────────────────────────────────────

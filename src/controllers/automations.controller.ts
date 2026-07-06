@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { pool } from '../db/pool';
 import { AuthenticatedRequest } from '../types';
+import { PLAN_LIMITS, PlanTier } from '../plans';
 
 const VALID_TRIGGER_TYPES  = ['SENSOR_THRESHOLD', 'TIME_BASED', 'DEVICE_STATUS'];
 const VALID_CONDITIONS     = ['GT', 'LT', 'EQ', 'GTE', 'LTE'];
@@ -54,6 +55,24 @@ export const createAutomation = async (req: AuthenticatedRequest, res: Response)
   }
   if (trigger_condition && !VALID_CONDITIONS.includes(trigger_condition)) {
     res.status(400).json({ error: `trigger_condition invalide. Valeurs : ${VALID_CONDITIONS.join(', ')}` });
+    return;
+  }
+
+  // Enforce plan automation limit
+  const planRow = await pool.query<{ plan: PlanTier; count: string }>(
+    `SELECT u.plan, COUNT(a.id)::text AS count
+     FROM users u LEFT JOIN automations a ON a.owner_id = u.id
+     WHERE u.id = $1 GROUP BY u.plan`,
+    [req.user!.userId],
+  );
+  const userPlan = (planRow.rows[0]?.plan ?? 'FREE') as PlanTier;
+  const autoCount = parseInt(planRow.rows[0]?.count ?? '0');
+  const autoLimit = PLAN_LIMITS[userPlan].automations;
+  if (autoLimit !== -1 && autoCount >= autoLimit) {
+    res.status(403).json({
+      error: `Limite atteinte : votre plan ${userPlan} autorise ${autoLimit} automatisations maximum.`,
+      code: 'PLAN_LIMIT_AUTOMATIONS',
+    });
     return;
   }
 

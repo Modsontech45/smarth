@@ -308,7 +308,7 @@ export const getMe = async (req: AuthenticatedRequest, res: Response): Promise<v
   const userId = req.user!.userId;
 
   const result = await pool.query(
-    'SELECT id, name, email, role, api_key, email_verified, created_at FROM users WHERE id = $1',
+    'SELECT id, name, email, role, api_key, email_verified, plan, plan_expires_at, created_at FROM users WHERE id = $1',
     [userId]
   );
 

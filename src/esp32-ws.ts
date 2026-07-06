@@ -62,8 +62,35 @@ export function initESP32WebSocket(httpServer: HttpServer) {
           userId = rows[0].id as number;
           clearTimeout(authTimer);
           clients.set(userId, ws);
+
+          // Fetch intended relay states before replying
+          const { rows: stateRows } = await pool.query<{ device_key: string; state: boolean }>(
+            `SELECT d.device_key, COALESCE(a.state, false) AS state
+             FROM   devices d
+             LEFT JOIN actuator_states a ON a.device_id = d.id
+             WHERE  d.owner_id = $1 AND d.type = 'OUTPUT'
+             ORDER  BY d.id`,
+            [userId],
+          );
+
           send(ws, 'connected', { userId });
-          console.log(`[ESP32 WS] user ${userId} connected`);
+
+          // Push each relay's intended state so the ESP32 restores it on boot
+          for (const r of stateRows) {
+            send(ws, 'actuator:command', { deviceKey: r.device_key, state: r.state });
+          }
+
+          // Restart ON-time counters for relays that should be ON
+          await pool.query(
+            `INSERT INTO actuator_state_history (device_id, state, changed_by)
+             SELECT ast.device_id, true, 'esp32_reconnect'
+             FROM   actuator_states ast
+             JOIN   devices d ON d.id = ast.device_id
+             WHERE  d.owner_id = $1 AND ast.state = true`,
+            [userId],
+          );
+
+          console.log(`[ESP32 WS] user ${userId} connected — synced ${stateRows.length} relay(s)`);
         } catch (err) {
           console.error('[ESP32 WS] auth error:', err);
           ws.close(1011, 'server error');
@@ -81,10 +108,30 @@ export function initESP32WebSocket(httpServer: HttpServer) {
       }
     });
 
-    ws.on('close', () => {
+    ws.on('close', async () => {
       if (userId !== null) {
         clients.delete(userId);
         console.log(`[ESP32 WS] user ${userId} disconnected`);
+
+        try {
+          // Stop ON-time counters: insert OFF in history for currently-ON actuators.
+          // Do NOT reset actuator_states — the intended state is preserved so the
+          // ESP32 can restore it on reconnect.
+          await pool.query(
+            `INSERT INTO actuator_state_history (device_id, state, changed_by)
+             SELECT ast.device_id, false, 'esp32_disconnect'
+             FROM   actuator_states ast
+             JOIN   devices d ON d.id = ast.device_id
+             WHERE  d.owner_id = $1 AND ast.state = true`,
+            [userId],
+          );
+          await pool.query(
+            `UPDATE devices SET status = 'OFFLINE' WHERE owner_id = $1`, [userId],
+          );
+        } catch (err) {
+          console.error('[ESP32 WS] close cleanup error:', err);
+        }
+
         emitToUser(userId, 'device:offline', {});
       }
     });

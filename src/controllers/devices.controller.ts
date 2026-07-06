@@ -2,6 +2,7 @@ import { Response } from 'express';
 import crypto from 'crypto';
 import { pool } from '../db/pool';
 import { AuthenticatedRequest } from '../types';
+import { PLAN_LIMITS, PlanTier } from '../plans';
 
 const VALID_SIGNAL_TYPES = ['digital', 'analog', 'pwm', 'dht22', 'i2c', 'uart'];
 const VALID_DATA_TYPES   = ['boolean', 'float', 'integer', 'percentage'];
@@ -95,6 +96,24 @@ export const createDevice = async (req: AuthenticatedRequest, res: Response): Pr
     return;
   }
   if (!validateConfig(signal_type, data_type, res)) return;
+
+  // Enforce plan device limit
+  const planRow = await pool.query<{ plan: PlanTier; count: string }>(
+    `SELECT u.plan, COUNT(d.id)::text AS count
+     FROM users u LEFT JOIN devices d ON d.owner_id = u.id
+     WHERE u.id = $1 GROUP BY u.plan`,
+    [req.user!.userId],
+  );
+  const userPlan = (planRow.rows[0]?.plan ?? 'FREE') as PlanTier;
+  const deviceCount = parseInt(planRow.rows[0]?.count ?? '0');
+  const limit = PLAN_LIMITS[userPlan].devices;
+  if (limit !== -1 && deviceCount >= limit) {
+    res.status(403).json({
+      error: `Limite atteinte : votre plan ${userPlan} autorise ${limit} appareils maximum.`,
+      code: 'PLAN_LIMIT_DEVICES',
+    });
+    return;
+  }
 
   const defaults  = getDefaults(signal_type.toLowerCase(), String(type).toUpperCase());
   const deviceKey = crypto.randomBytes(Number(process.env.DEVICE_TOKEN_BYTES) || 32).toString('hex');
