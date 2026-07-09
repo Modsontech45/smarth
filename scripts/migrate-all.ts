@@ -16,6 +16,10 @@ const migrations = [
   { file: '003_analytics.sql',         desc: 'analytics / statistiques' },
   { file: '004_device_config.sql',     desc: 'colonnes de configuration devices' },
   { file: '005_user_restrictions.sql', desc: 'table user_zone_restrictions' },
+  { file: '006_energy_readings.sql',   desc: 'table energy_readings' },
+  { file: '007_cameras.sql',           desc: 'table cameras' },
+  { file: '008_last_seen.sql',         desc: 'colonne last_seen sur devices' },
+  { file: '009_subscriptions.sql',     desc: 'table subscriptions / notifications push' },
 ];
 
 async function runAll(): Promise<void> {

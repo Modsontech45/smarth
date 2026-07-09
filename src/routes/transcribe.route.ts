@@ -6,11 +6,16 @@ import Groq from 'groq-sdk';
 
 const router = Router();
 const upload = multer({ dest: os.tmpdir() });
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 router.post('/', upload.single('audio'), async (req: Request, res: Response) => {
+  if (!process.env.GROQ_API_KEY) {
+    return void res.status(503).json({ error: 'Transcription service not configured' });
+  }
+
   const file = (req as any).file;
   if (!file) return void res.status(400).json({ error: 'No audio file provided' });
+
+  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
   // Groq requires a file extension to detect MIME type — rename temp file to .wav
   const wavPath = file.path + '.wav';

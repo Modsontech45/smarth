@@ -3,13 +3,16 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { verifyJWT } from '../middleware/auth.middleware';
 
 const router = Router();
-const genAI  = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 interface ActuatorInfo { id: number; name: string; room: string; state: boolean }
 interface SensorInfo   { name: string; value: string | number | boolean; unit?: string }
 interface HistoryEntry { userText: string; reply: string }
 
 router.post('/interpret', verifyJWT, async (req: Request, res: Response) => {
+  if (!process.env.GEMINI_API_KEY) {
+    return void res.status(503).json({ action: null, targets: [], reply: 'Service vocal non configuré.' });
+  }
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const { transcript, actuators, history, sensors } = req.body as {
     transcript: string;
     actuators:  ActuatorInfo[];
