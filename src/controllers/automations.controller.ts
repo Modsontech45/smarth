@@ -44,11 +44,15 @@ export const createAutomation = async (req: AuthenticatedRequest, res: Response)
     name, description,
     trigger_type, trigger_device_id, trigger_condition, trigger_value, trigger_time,
     trigger_field,
-    action_device_id, action_state,
+    action_device_id, action_state, action_all_devices,
   } = req.body;
 
-  if (!name || !trigger_type || action_device_id === undefined || action_state === undefined) {
-    res.status(400).json({ error: 'name, trigger_type, action_device_id et action_state sont obligatoires' });
+  if (!name || !trigger_type || action_state === undefined) {
+    res.status(400).json({ error: 'name, trigger_type et action_state sont obligatoires' });
+    return;
+  }
+  if (!action_all_devices && action_device_id === undefined) {
+    res.status(400).json({ error: "Choisissez un appareil cible ou activez 'Tous les actionneurs'" });
     return;
   }
   if (!VALID_TRIGGER_TYPES.includes(trigger_type)) {
@@ -78,22 +82,24 @@ export const createAutomation = async (req: AuthenticatedRequest, res: Response)
     return;
   }
 
-  // Verify action device belongs to user
-  const deviceCheck = await pool.query(
-    'SELECT id FROM devices WHERE id = $1 AND owner_id = $2',
-    [action_device_id, req.user!.userId]
-  );
-  if ((deviceCheck.rowCount ?? 0) === 0) {
-    res.status(404).json({ error: 'Appareil d\'action introuvable' });
-    return;
+  // Verify action device belongs to user (only when not targeting all devices)
+  if (!action_all_devices && action_device_id !== undefined) {
+    const deviceCheck = await pool.query(
+      'SELECT id FROM devices WHERE id = $1 AND owner_id = $2',
+      [action_device_id, req.user!.userId]
+    );
+    if ((deviceCheck.rowCount ?? 0) === 0) {
+      res.status(404).json({ error: "Appareil d'action introuvable" });
+      return;
+    }
   }
 
   const result = await pool.query(
     `INSERT INTO automations
        (owner_id, name, description, trigger_type, trigger_device_id,
         trigger_condition, trigger_value, trigger_time, trigger_field,
-        action_device_id, action_state)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        action_device_id, action_state, action_all_devices)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      RETURNING *`,
     [
       req.user!.userId, name, description || null,
@@ -103,8 +109,9 @@ export const createAutomation = async (req: AuthenticatedRequest, res: Response)
       trigger_value     ?? null,
       trigger_time      || null,
       trigger_field     || null,
-      action_device_id,
+      action_all_devices ? null : (action_device_id ?? null),
       action_state,
+      action_all_devices ?? false,
     ]
   );
 
@@ -126,13 +133,18 @@ export const updateAutomation = async (req: AuthenticatedRequest, res: Response)
     name, description,
     trigger_type, trigger_device_id, trigger_condition, trigger_value, trigger_time,
     trigger_field,
-    action_device_id, action_state, enabled,
+    action_device_id, action_state, action_all_devices, enabled,
   } = req.body;
 
   if (trigger_type && !VALID_TRIGGER_TYPES.includes(trigger_type)) {
     res.status(400).json({ error: `trigger_type invalide` });
     return;
   }
+
+  // When switching to action_all_devices, clear action_device_id; otherwise use provided value or keep existing
+  const effectiveActionDeviceId = action_all_devices === true
+    ? null
+    : (action_device_id ?? null);
 
   const result = await pool.query(
     `UPDATE automations SET
@@ -144,11 +156,16 @@ export const updateAutomation = async (req: AuthenticatedRequest, res: Response)
        trigger_value      = COALESCE($6,  trigger_value),
        trigger_time       = COALESCE($7,  trigger_time),
        trigger_field      = COALESCE($8,  trigger_field),
-       action_device_id   = COALESCE($9,  action_device_id),
-       action_state       = COALESCE($10, action_state),
-       enabled            = COALESCE($11, enabled),
+       action_all_devices = COALESCE($9,  action_all_devices),
+       action_device_id   = CASE
+                              WHEN $9::boolean = true THEN NULL
+                              WHEN $10 IS NOT NULL    THEN $10
+                              ELSE action_device_id
+                            END,
+       action_state       = COALESCE($11, action_state),
+       enabled            = COALESCE($12, enabled),
        updated_at         = NOW()
-     WHERE id = $12 AND owner_id = $13
+     WHERE id = $13 AND owner_id = $14
      RETURNING *`,
     [
       name          || null,
@@ -159,9 +176,10 @@ export const updateAutomation = async (req: AuthenticatedRequest, res: Response)
       trigger_value     ?? null,
       trigger_time      || null,
       trigger_field     || null,
-      action_device_id  ?? null,
-      action_state      ?? null,
-      enabled           ?? null,
+      action_all_devices ?? null,
+      effectiveActionDeviceId,
+      action_state   ?? null,
+      enabled        ?? null,
       req.params.id,
       req.user!.userId,
     ]

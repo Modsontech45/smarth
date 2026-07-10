@@ -21,6 +21,7 @@ const migrations = [
   { file: '008_last_seen.sql',         desc: 'colonne last_seen sur devices' },
   { file: '009_subscriptions.sql',     desc: 'table subscriptions / notifications push' },
   { file: '010_automation_trigger_field.sql', desc: 'colonne trigger_field sur automations' },
+  { file: '011_automation_all_devices.sql',   desc: 'action_all_devices + action_device_id nullable' },
 ];
 
 async function runAll(): Promise<void> {

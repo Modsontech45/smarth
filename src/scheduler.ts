@@ -31,6 +31,34 @@ function evaluateCondition(value: number, condition: string, threshold: number):
   }
 }
 
+async function fireOneDevice(
+  deviceId: number,
+  deviceKey: string,
+  deviceName: string,
+  deviceZone: string,
+  actionState: boolean,
+  ownerId: number,
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO actuator_states (device_id, state, triggered_by, updated_at)
+     VALUES ($1, $2, 'automation', NOW())
+     ON CONFLICT (device_id)
+     DO UPDATE SET state = $2, triggered_by = 'automation', updated_at = NOW()`,
+    [deviceId, actionState],
+  );
+  await pool.query(
+    `INSERT INTO actuator_state_history (device_id, state, changed_by, changed_at)
+     VALUES ($1, $2, 'automation', NOW())`,
+    [deviceId, actionState],
+  );
+  emitToUser(ownerId, 'actuator:update', {
+    id: deviceId, name: deviceName, zone: deviceZone,
+    state: actionState, triggeredBy: 'automation',
+    updated_at: new Date().toISOString(),
+  });
+  sendToESP32(ownerId, 'actuator:command', { deviceKey, state: actionState });
+}
+
 async function fireAutomation(
   automationId: number,
   actionDeviceId: number,
@@ -40,37 +68,25 @@ async function fireAutomation(
   deviceZone: string,
   ownerId: number,
 ): Promise<void> {
-  await pool.query(
-    `INSERT INTO actuator_states (device_id, state, triggered_by, updated_at)
-     VALUES ($1, $2, 'automation', NOW())
-     ON CONFLICT (device_id)
-     DO UPDATE SET state = $2, triggered_by = 'automation', updated_at = NOW()`,
-    [actionDeviceId, actionState],
-  );
-
-  await pool.query(
-    `INSERT INTO actuator_state_history (device_id, state, changed_by, changed_at)
-     VALUES ($1, $2, 'automation', NOW())`,
-    [actionDeviceId, actionState],
-  );
-
-  await pool.query(
-    `UPDATE automations SET last_triggered_at = NOW() WHERE id = $1`,
-    [automationId],
-  );
-
-  emitToUser(ownerId, 'actuator:update', {
-    id:          actionDeviceId,
-    name:        deviceName,
-    zone:        deviceZone,
-    state:       actionState,
-    triggeredBy: 'automation',
-    updated_at:  new Date().toISOString(),
-  });
-
-  sendToESP32(ownerId, 'actuator:command', { deviceKey, state: actionState });
-
+  await fireOneDevice(actionDeviceId, deviceKey, deviceName, deviceZone, actionState, ownerId);
+  await pool.query(`UPDATE automations SET last_triggered_at = NOW() WHERE id = $1`, [automationId]);
   console.log(`[Automation] → device #${actionDeviceId} (${deviceName}) ${actionState ? 'ON' : 'OFF'}`);
+}
+
+async function fireAutomationToAll(
+  automationId: number,
+  actionState: boolean,
+  ownerId: number,
+): Promise<void> {
+  const { rows } = await pool.query<{ id: number; device_key: string; name: string; zone: string }>(
+    `SELECT id, device_key, name, zone FROM devices WHERE owner_id=$1 AND type='OUTPUT'`,
+    [ownerId],
+  );
+  for (const d of rows) {
+    await fireOneDevice(d.id, d.device_key, d.name, d.zone, actionState, ownerId);
+  }
+  await pool.query(`UPDATE automations SET last_triggered_at = NOW() WHERE id = $1`, [automationId]);
+  console.log(`[Automation] → ALL ${rows.length} device(s) ${actionState ? 'ON' : 'OFF'}`);
 }
 
 async function evaluateTimeBased(): Promise<void> {
@@ -81,13 +97,14 @@ async function evaluateTimeBased(): Promise<void> {
   try {
     const { rows } = await pool.query<{
       id: number; owner_id: number;
-      action_device_id: number; action_state: boolean;
-      device_key: string; device_name: string; device_zone: string;
+      action_device_id: number | null; action_state: boolean; action_all_devices: boolean;
+      device_key: string | null; device_name: string | null; device_zone: string | null;
     }>(
       `SELECT a.id, a.owner_id, a.action_device_id, a.action_state,
+              COALESCE(a.action_all_devices, false) AS action_all_devices,
               d.device_key, d.name AS device_name, d.zone AS device_zone
        FROM automations a
-       JOIN devices d ON d.id = a.action_device_id
+       LEFT JOIN devices d ON d.id = a.action_device_id
        WHERE a.enabled = true
          AND a.trigger_type = 'TIME_BASED'
          AND to_char(a.trigger_time, 'HH24:MI') = $1
@@ -97,10 +114,14 @@ async function evaluateTimeBased(): Promise<void> {
     );
 
     for (const row of rows) {
-      await fireAutomation(
-        row.id, row.action_device_id, row.action_state,
-        row.device_key, row.device_name, row.device_zone, row.owner_id,
-      );
+      if (row.action_all_devices) {
+        await fireAutomationToAll(row.id, row.action_state, row.owner_id);
+      } else if (row.action_device_id && row.device_key) {
+        await fireAutomation(
+          row.id, row.action_device_id, row.action_state,
+          row.device_key, row.device_name!, row.device_zone!, row.owner_id,
+        );
+      }
     }
   } catch (err) {
     console.error('[Automation] TIME_BASED error:', err);
@@ -112,15 +133,16 @@ async function evaluateSensorThreshold(): Promise<void> {
   try {
     const { rows } = await pool.query<{
       id: number; owner_id: number;
-      action_device_id: number; action_state: boolean;
+      action_device_id: number | null; action_state: boolean; action_all_devices: boolean;
       trigger_condition: string; trigger_value: number;
       trigger_field: string | null;
       trigger_unit: string | null; trigger_signal_type: string | null; trigger_device_name: string | null;
-      device_key: string; device_name: string; device_zone: string;
+      device_key: string | null; device_name: string | null; device_zone: string | null;
       latest_reading: Record<string, number | boolean | null> | null;
     }>(
       `SELECT
          a.id, a.owner_id, a.action_device_id, a.action_state,
+         COALESCE(a.action_all_devices, false) AS action_all_devices,
          a.trigger_condition, a.trigger_value, a.trigger_field,
          td.unit AS trigger_unit, td.signal_type AS trigger_signal_type,
          td.name AS trigger_device_name,
@@ -138,7 +160,7 @@ async function evaluateSensorThreshold(): Promise<void> {
          ) AS latest_reading
        FROM automations a
        JOIN devices td ON td.id = a.trigger_device_id
-       JOIN devices ad ON ad.id = a.action_device_id
+       LEFT JOIN devices ad ON ad.id = a.action_device_id
        WHERE a.enabled = true
          AND a.trigger_type = 'SENSOR_THRESHOLD'
          AND a.trigger_device_id IS NOT NULL
@@ -151,21 +173,23 @@ async function evaluateSensorThreshold(): Promise<void> {
     for (const row of rows) {
       if (!row.latest_reading) continue;
 
-      // Use explicit trigger_field when available; fall back to inference for legacy rows
       const field = row.trigger_field
         ?? sensorFieldFallback(row.trigger_unit, row.trigger_signal_type, row.trigger_device_name);
 
       const rawVal = row.latest_reading[field];
       if (rawVal == null) continue;
 
-      // Convert booleans to 0/1 so numeric comparisons work (motion, water_leak)
       const numericVal = typeof rawVal === 'boolean' ? (rawVal ? 1 : 0) : (rawVal as number);
 
       if (evaluateCondition(numericVal, row.trigger_condition, row.trigger_value)) {
-        await fireAutomation(
-          row.id, row.action_device_id, row.action_state,
-          row.device_key, row.device_name, row.device_zone, row.owner_id,
-        );
+        if (row.action_all_devices) {
+          await fireAutomationToAll(row.id, row.action_state, row.owner_id);
+        } else if (row.action_device_id && row.device_key) {
+          await fireAutomation(
+            row.id, row.action_device_id, row.action_state,
+            row.device_key, row.device_name!, row.device_zone!, row.owner_id,
+          );
+        }
       }
     }
   } catch (err) {
