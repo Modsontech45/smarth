@@ -3,6 +3,10 @@ import { emitToUser } from './socket';
 import { sendToESP32 } from './esp32-ws';
 import https from 'https';
 
+// Tracks pending auto-off timers keyed by automation id.
+// Cleared and reset each time the same automation fires again.
+const autoOffTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
 // Infer the sensor_readings field when trigger_field is absent (legacy rows).
 function sensorFieldFallback(unit: string | null, signalType: string | null, name: string | null): string {
   const u  = (unit       ?? '').toLowerCase();
@@ -67,16 +71,29 @@ async function fireAutomation(
   deviceName: string,
   deviceZone: string,
   ownerId: number,
+  durationSeconds = 0,
 ): Promise<void> {
   await fireOneDevice(actionDeviceId, deviceKey, deviceName, deviceZone, actionState, ownerId);
   await pool.query(`UPDATE automations SET last_triggered_at = NOW() WHERE id = $1`, [automationId]);
   console.log(`[Automation] → device #${actionDeviceId} (${deviceName}) ${actionState ? 'ON' : 'OFF'}`);
+
+  if (actionState && durationSeconds > 0) {
+    const prev = autoOffTimers.get(automationId);
+    if (prev) clearTimeout(prev);
+    const t = setTimeout(async () => {
+      autoOffTimers.delete(automationId);
+      await fireOneDevice(actionDeviceId, deviceKey, deviceName, deviceZone, false, ownerId);
+      console.log(`[Automation] auto-off device #${actionDeviceId} after ${durationSeconds}s`);
+    }, durationSeconds * 1000);
+    autoOffTimers.set(automationId, t);
+  }
 }
 
 async function fireAutomationToAll(
   automationId: number,
   actionState: boolean,
   ownerId: number,
+  durationSeconds = 0,
 ): Promise<void> {
   const { rows } = await pool.query<{ id: number; device_key: string; name: string; zone: string }>(
     `SELECT id, device_key, name, zone FROM devices WHERE owner_id=$1 AND type='OUTPUT'`,
@@ -87,6 +104,23 @@ async function fireAutomationToAll(
   }
   await pool.query(`UPDATE automations SET last_triggered_at = NOW() WHERE id = $1`, [automationId]);
   console.log(`[Automation] → ALL ${rows.length} device(s) ${actionState ? 'ON' : 'OFF'}`);
+
+  if (actionState && durationSeconds > 0) {
+    const prev = autoOffTimers.get(automationId);
+    if (prev) clearTimeout(prev);
+    const t = setTimeout(async () => {
+      autoOffTimers.delete(automationId);
+      const { rows: offRows } = await pool.query<{ id: number; device_key: string; name: string; zone: string }>(
+        `SELECT id, device_key, name, zone FROM devices WHERE owner_id=$1 AND type='OUTPUT'`,
+        [ownerId],
+      );
+      for (const d of offRows) {
+        await fireOneDevice(d.id, d.device_key, d.name, d.zone, false, ownerId);
+      }
+      console.log(`[Automation] auto-off ALL devices after ${durationSeconds}s`);
+    }, durationSeconds * 1000);
+    autoOffTimers.set(automationId, t);
+  }
 }
 
 async function evaluateTimeBased(): Promise<void> {
@@ -98,10 +132,12 @@ async function evaluateTimeBased(): Promise<void> {
     const { rows } = await pool.query<{
       id: number; owner_id: number;
       action_device_id: number | null; action_state: boolean; action_all_devices: boolean;
+      action_duration_seconds: number | null;
       device_key: string | null; device_name: string | null; device_zone: string | null;
     }>(
       `SELECT a.id, a.owner_id, a.action_device_id, a.action_state,
               COALESCE(a.action_all_devices, false) AS action_all_devices,
+              a.action_duration_seconds,
               d.device_key, d.name AS device_name, d.zone AS device_zone
        FROM automations a
        LEFT JOIN devices d ON d.id = a.action_device_id
@@ -114,12 +150,13 @@ async function evaluateTimeBased(): Promise<void> {
     );
 
     for (const row of rows) {
+      const dur = row.action_duration_seconds ?? 0;
       if (row.action_all_devices) {
-        await fireAutomationToAll(row.id, row.action_state, row.owner_id);
+        await fireAutomationToAll(row.id, row.action_state, row.owner_id, dur);
       } else if (row.action_device_id && row.device_key) {
         await fireAutomation(
           row.id, row.action_device_id, row.action_state,
-          row.device_key, row.device_name!, row.device_zone!, row.owner_id,
+          row.device_key, row.device_name!, row.device_zone!, row.owner_id, dur,
         );
       }
     }
@@ -134,6 +171,7 @@ async function evaluateSensorThreshold(): Promise<void> {
     const { rows } = await pool.query<{
       id: number; owner_id: number;
       action_device_id: number | null; action_state: boolean; action_all_devices: boolean;
+      action_duration_seconds: number | null;
       trigger_condition: string; trigger_value: number;
       trigger_field: string | null;
       trigger_unit: string | null; trigger_signal_type: string | null; trigger_device_name: string | null;
@@ -143,6 +181,7 @@ async function evaluateSensorThreshold(): Promise<void> {
       `SELECT
          a.id, a.owner_id, a.action_device_id, a.action_state,
          COALESCE(a.action_all_devices, false) AS action_all_devices,
+         a.action_duration_seconds,
          a.trigger_condition, a.trigger_value, a.trigger_field,
          td.unit AS trigger_unit, td.signal_type AS trigger_signal_type,
          td.name AS trigger_device_name,
@@ -180,14 +219,15 @@ async function evaluateSensorThreshold(): Promise<void> {
       if (rawVal == null) continue;
 
       const numericVal = typeof rawVal === 'boolean' ? (rawVal ? 1 : 0) : (rawVal as number);
+      const dur = row.action_duration_seconds ?? 0;
 
       if (evaluateCondition(numericVal, row.trigger_condition, row.trigger_value)) {
         if (row.action_all_devices) {
-          await fireAutomationToAll(row.id, row.action_state, row.owner_id);
+          await fireAutomationToAll(row.id, row.action_state, row.owner_id, dur);
         } else if (row.action_device_id && row.device_key) {
           await fireAutomation(
             row.id, row.action_device_id, row.action_state,
-            row.device_key, row.device_name!, row.device_zone!, row.owner_id,
+            row.device_key, row.device_name!, row.device_zone!, row.owner_id, dur,
           );
         }
       }
@@ -208,6 +248,7 @@ export async function evaluateSensorAutomations(
     const { rows } = await pool.query<{
       id: number; owner_id: number;
       action_device_id: number | null; action_state: boolean; action_all_devices: boolean;
+      action_duration_seconds: number | null;
       trigger_condition: string; trigger_value: number;
       trigger_field: string | null;
       trigger_unit: string | null; trigger_signal_type: string | null; trigger_device_name: string | null;
@@ -216,6 +257,7 @@ export async function evaluateSensorAutomations(
       `SELECT
          a.id, a.owner_id, a.action_device_id, a.action_state,
          COALESCE(a.action_all_devices, false) AS action_all_devices,
+         a.action_duration_seconds,
          a.trigger_condition, a.trigger_value, a.trigger_field,
          td.unit AS trigger_unit, td.signal_type AS trigger_signal_type,
          td.name AS trigger_device_name,
@@ -241,14 +283,15 @@ export async function evaluateSensorAutomations(
       if (rawVal == null) continue;
 
       const numericVal = typeof rawVal === 'boolean' ? (rawVal ? 1 : 0) : (rawVal as number);
+      const dur = row.action_duration_seconds ?? 0;
 
       if (evaluateCondition(numericVal, row.trigger_condition, row.trigger_value)) {
         if (row.action_all_devices) {
-          await fireAutomationToAll(row.id, row.action_state, row.owner_id);
+          await fireAutomationToAll(row.id, row.action_state, row.owner_id, dur);
         } else if (row.action_device_id && row.device_key) {
           await fireAutomation(
             row.id, row.action_device_id, row.action_state,
-            row.device_key, row.device_name!, row.device_zone!, row.owner_id,
+            row.device_key, row.device_name!, row.device_zone!, row.owner_id, dur,
           );
         }
       }

@@ -22,6 +22,7 @@ const migrations = [
   { file: '009_subscriptions.sql',     desc: 'table subscriptions / notifications push' },
   { file: '010_automation_trigger_field.sql', desc: 'colonne trigger_field sur automations' },
   { file: '011_automation_all_devices.sql',   desc: 'action_all_devices + action_device_id nullable' },
+  { file: '012_automation_duration.sql',      desc: 'action_duration_seconds — auto turn-off timer' },
 ];
 
 async function runAll(): Promise<void> {

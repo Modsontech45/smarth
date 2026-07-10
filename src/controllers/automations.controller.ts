@@ -44,7 +44,7 @@ export const createAutomation = async (req: AuthenticatedRequest, res: Response)
     name, description,
     trigger_type, trigger_device_id, trigger_condition, trigger_value, trigger_time,
     trigger_field,
-    action_device_id, action_state, action_all_devices,
+    action_device_id, action_state, action_all_devices, action_duration_seconds,
   } = req.body;
 
   if (!name || !trigger_type || action_state === undefined) {
@@ -98,8 +98,8 @@ export const createAutomation = async (req: AuthenticatedRequest, res: Response)
     `INSERT INTO automations
        (owner_id, name, description, trigger_type, trigger_device_id,
         trigger_condition, trigger_value, trigger_time, trigger_field,
-        action_device_id, action_state, action_all_devices)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        action_device_id, action_state, action_all_devices, action_duration_seconds)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      RETURNING *`,
     [
       req.user!.userId, name, description || null,
@@ -112,6 +112,7 @@ export const createAutomation = async (req: AuthenticatedRequest, res: Response)
       action_all_devices ? null : (action_device_id ?? null),
       action_state,
       action_all_devices ?? false,
+      action_duration_seconds ? parseInt(action_duration_seconds) : null,
     ]
   );
 
@@ -133,7 +134,7 @@ export const updateAutomation = async (req: AuthenticatedRequest, res: Response)
     name, description,
     trigger_type, trigger_device_id, trigger_condition, trigger_value, trigger_time,
     trigger_field,
-    action_device_id, action_state, action_all_devices, enabled,
+    action_device_id, action_state, action_all_devices, action_duration_seconds, enabled,
   } = req.body;
 
   if (trigger_type && !VALID_TRIGGER_TYPES.includes(trigger_type)) {
@@ -148,24 +149,25 @@ export const updateAutomation = async (req: AuthenticatedRequest, res: Response)
 
   const result = await pool.query(
     `UPDATE automations SET
-       name               = COALESCE($1,  name),
-       description        = COALESCE($2,  description),
-       trigger_type       = COALESCE($3,  trigger_type),
-       trigger_device_id  = COALESCE($4,  trigger_device_id),
-       trigger_condition  = COALESCE($5,  trigger_condition),
-       trigger_value      = COALESCE($6,  trigger_value),
-       trigger_time       = COALESCE($7,  trigger_time),
-       trigger_field      = COALESCE($8,  trigger_field),
-       action_all_devices = COALESCE($9,  action_all_devices),
-       action_device_id   = CASE
-                              WHEN $9::boolean = true THEN NULL
-                              WHEN $10 IS NOT NULL    THEN $10
-                              ELSE action_device_id
-                            END,
-       action_state       = COALESCE($11, action_state),
-       enabled            = COALESCE($12, enabled),
-       updated_at         = NOW()
-     WHERE id = $13 AND owner_id = $14
+       name                    = COALESCE($1,  name),
+       description             = COALESCE($2,  description),
+       trigger_type            = COALESCE($3,  trigger_type),
+       trigger_device_id       = COALESCE($4,  trigger_device_id),
+       trigger_condition       = COALESCE($5,  trigger_condition),
+       trigger_value           = COALESCE($6,  trigger_value),
+       trigger_time            = COALESCE($7,  trigger_time),
+       trigger_field           = COALESCE($8,  trigger_field),
+       action_all_devices      = COALESCE($9,  action_all_devices),
+       action_device_id        = CASE
+                                   WHEN $9::boolean = true       THEN NULL
+                                   WHEN $10::integer IS NOT NULL THEN $10::integer
+                                   ELSE action_device_id
+                                 END,
+       action_state            = COALESCE($11, action_state),
+       action_duration_seconds = COALESCE($12, action_duration_seconds),
+       enabled                 = COALESCE($13, enabled),
+       updated_at              = NOW()
+     WHERE id = $14 AND owner_id = $15
      RETURNING *`,
     [
       name          || null,
@@ -178,8 +180,9 @@ export const updateAutomation = async (req: AuthenticatedRequest, res: Response)
       trigger_field     || null,
       action_all_devices ?? null,
       effectiveActionDeviceId,
-      action_state   ?? null,
-      enabled        ?? null,
+      action_state            ?? null,
+      action_duration_seconds !== undefined ? (action_duration_seconds || 0) : null,
+      enabled                 ?? null,
       req.params.id,
       req.user!.userId,
     ]
