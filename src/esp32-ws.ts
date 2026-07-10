@@ -33,6 +33,15 @@ const clients = new Map<number, WebSocket>();
 export function initESP32WebSocket(httpServer: HttpServer) {
   const wss = new WebSocketServer({ server: httpServer, path: '/esp32/ws' });
 
+  // Send an application-level JSON ping every 25 s to all authenticated ESP32 connections.
+  // Protocol-level WS ping/pong frames are invisible to most reverse proxies and can be
+  // missed when the server or ESP32 is busy — JSON text frames are far more reliable.
+  setInterval(() => {
+    clients.forEach((ws) => {
+      if (ws.readyState === WebSocket.OPEN) send(ws, 'server:ping', {});
+    });
+  }, 25_000);
+
   wss.on('connection', (ws) => {
     let userId: number | null = null;
 
@@ -62,6 +71,15 @@ export function initESP32WebSocket(httpServer: HttpServer) {
           userId = rows[0].id as number;
           clearTimeout(authTimer);
           clients.set(userId, ws);
+
+          // Immediately mark all devices ONLINE — the ESP32 just (re)connected.
+          // Without this, a brief WS drop leaves devices OFFLINE until the next heartbeat.
+          const { rows: onlineRows } = await pool.query<{ id: number }>(
+            `UPDATE devices SET status='ONLINE', last_seen=NOW()
+             WHERE owner_id=$1 RETURNING id`,
+            [userId],
+          );
+          emitToUser(userId, 'device:online', { deviceIds: onlineRows.map(r => r.id) });
 
           // Fetch intended relay states before replying
           const { rows: stateRows } = await pool.query<{ device_key: string; state: boolean }>(
@@ -105,18 +123,20 @@ export function initESP32WebSocket(httpServer: HttpServer) {
         case 'energy:reading':  await onEnergyReading(userId, msg.data);  break;
         case 'alert':           await onAlert(userId, msg.data);          break;
         case 'heartbeat':       await onHeartbeat(userId, msg.data);      break;
+        case 'pong':            break; // response to our server:ping keepalive
       }
     });
 
     ws.on('close', async () => {
       if (userId !== null) {
         clients.delete(userId);
-        console.log(`[ESP32 WS] user ${userId} disconnected`);
+        console.log(`[ESP32 WS] user ${userId} disconnected — waiting for reconnect or last_seen timeout`);
 
         try {
           // Stop ON-time counters: insert OFF in history for currently-ON actuators.
-          // Do NOT reset actuator_states — the intended state is preserved so the
-          // ESP32 can restore it on reconnect.
+          // Do NOT flip device status here — the ESP32 reconnects in ~5 s, and an
+          // immediate OFFLINE would disable dashboard toggles during that window.
+          // The scheduler marks devices OFFLINE once last_seen exceeds 90 s.
           await pool.query(
             `INSERT INTO actuator_state_history (device_id, state, changed_by)
              SELECT ast.device_id, false, 'esp32_disconnect'
@@ -125,14 +145,9 @@ export function initESP32WebSocket(httpServer: HttpServer) {
              WHERE  d.owner_id = $1 AND ast.state = true`,
             [userId],
           );
-          await pool.query(
-            `UPDATE devices SET status = 'OFFLINE' WHERE owner_id = $1`, [userId],
-          );
         } catch (err) {
           console.error('[ESP32 WS] close cleanup error:', err);
         }
-
-        emitToUser(userId, 'device:offline', {});
       }
     });
 
