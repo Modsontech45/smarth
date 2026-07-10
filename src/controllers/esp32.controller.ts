@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { pool } from '../db/pool';
 import { emitToUser } from '../socket';
+import { evaluateSensorAutomations } from '../scheduler';
 
 // GET /api/esp32/config
 export const getEsp32Config = async (req: Request, res: Response) => {
@@ -46,6 +47,11 @@ export const postReadings = async (req: Request, res: Response) => {
       timestamp: now,
     });
     emitToUser(device.owner_id, 'device:status', { deviceId: device.id, status: 'ONLINE' });
+
+    // Evaluate sensor automations immediately (fire-and-forget — doesn't block the response)
+    evaluateSensorAutomations(device.id, {
+      temperature, humidity, gas_ppm, air_quality, motion, light_lux, water_leak,
+    }).catch(err => console.error('[ESP32] automation eval error:', err));
   } catch (err) {
     console.error('[ESP32] postReadings error:', err);
   }
