@@ -20,6 +20,7 @@ const migrations = [
   { file: '007_cameras.sql',           desc: 'table cameras' },
   { file: '008_last_seen.sql',         desc: 'colonne last_seen sur devices' },
   { file: '009_subscriptions.sql',     desc: 'table subscriptions / notifications push' },
+  { file: '010_automation_trigger_field.sql', desc: 'colonne trigger_field sur automations' },
 ];
 
 async function runAll(): Promise<void> {

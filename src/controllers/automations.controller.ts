@@ -8,7 +8,8 @@ const VALID_CONDITIONS     = ['GT', 'LT', 'EQ', 'GTE', 'LTE'];
 
 const SELECT = `
   SELECT a.*,
-         td.name AS trigger_device_name,
+         td.name AS trigger_device_name, td.unit AS trigger_unit,
+         td.signal_type AS trigger_signal_type,
          ad.name AS action_device_name
   FROM automations a
   LEFT JOIN devices td ON td.id = a.trigger_device_id
@@ -42,6 +43,7 @@ export const createAutomation = async (req: AuthenticatedRequest, res: Response)
   const {
     name, description,
     trigger_type, trigger_device_id, trigger_condition, trigger_value, trigger_time,
+    trigger_field,
     action_device_id, action_state,
   } = req.body;
 
@@ -89,8 +91,9 @@ export const createAutomation = async (req: AuthenticatedRequest, res: Response)
   const result = await pool.query(
     `INSERT INTO automations
        (owner_id, name, description, trigger_type, trigger_device_id,
-        trigger_condition, trigger_value, trigger_time, action_device_id, action_state)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        trigger_condition, trigger_value, trigger_time, trigger_field,
+        action_device_id, action_state)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      RETURNING *`,
     [
       req.user!.userId, name, description || null,
@@ -99,6 +102,7 @@ export const createAutomation = async (req: AuthenticatedRequest, res: Response)
       trigger_condition || null,
       trigger_value     ?? null,
       trigger_time      || null,
+      trigger_field     || null,
       action_device_id,
       action_state,
     ]
@@ -121,6 +125,7 @@ export const updateAutomation = async (req: AuthenticatedRequest, res: Response)
   const {
     name, description,
     trigger_type, trigger_device_id, trigger_condition, trigger_value, trigger_time,
+    trigger_field,
     action_device_id, action_state, enabled,
   } = req.body;
 
@@ -138,11 +143,12 @@ export const updateAutomation = async (req: AuthenticatedRequest, res: Response)
        trigger_condition  = COALESCE($5,  trigger_condition),
        trigger_value      = COALESCE($6,  trigger_value),
        trigger_time       = COALESCE($7,  trigger_time),
-       action_device_id   = COALESCE($8,  action_device_id),
-       action_state       = COALESCE($9,  action_state),
-       enabled            = COALESCE($10, enabled),
+       trigger_field      = COALESCE($8,  trigger_field),
+       action_device_id   = COALESCE($9,  action_device_id),
+       action_state       = COALESCE($10, action_state),
+       enabled            = COALESCE($11, enabled),
        updated_at         = NOW()
-     WHERE id = $11 AND owner_id = $12
+     WHERE id = $12 AND owner_id = $13
      RETURNING *`,
     [
       name          || null,
@@ -152,6 +158,7 @@ export const updateAutomation = async (req: AuthenticatedRequest, res: Response)
       trigger_condition || null,
       trigger_value     ?? null,
       trigger_time      || null,
+      trigger_field     || null,
       action_device_id  ?? null,
       action_state      ?? null,
       enabled           ?? null,
