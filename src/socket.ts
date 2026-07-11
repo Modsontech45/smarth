@@ -2,6 +2,7 @@ import { Server as SocketServer } from 'socket.io';
 import type { Server as HttpServer } from 'http';
 import jwt from 'jsonwebtoken';
 import type { JWTPayload } from './types';
+import { sendToESP32 } from './esp32-ws';
 
 let io: SocketServer;
 
@@ -31,6 +32,11 @@ export function initSocket(httpServer: HttpServer): SocketServer {
 
     socket.on('disconnect', (reason) => {
       console.log(`[WS] User ${userId} disconnected — ${reason}`);
+    });
+
+    // ── Keep-alive relay: browser pings every 2 s → forward to ESP32 WS
+    socket.on('esp32:keepalive', () => {
+      sendToESP32(userId, 'server:ping', {});
     });
   });
 
